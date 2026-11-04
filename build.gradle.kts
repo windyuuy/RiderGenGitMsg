@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -18,10 +19,54 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        // Rider 2026.2.3.1 (build RD-262.10968.170), installed locally.
-        // The directory is named "JetBrains Rider 2025.2.3" but its product-info.json
-        // reports 2026.2.3.1 (see README).
-        local(providers.gradleProperty("platformLocalPath").get())
+        // Platform selection (local IDE, downloaded Rider, or downloaded IntelliJ IDEA):
+        //   -PplatformMode=local          -> installed IDE from -PplatformLocalPath / gradle.properties
+        //   -PplatformMode=download-rider -> Rider platform from JetBrains repositories (~4 GB, opt-in)
+        //   -PplatformMode=intellij-idea  -> IntelliJ IDEA platform (recommended for hosted CI)
+        //   auto (default)                -> local when the configured directory exists, intellij-idea otherwise
+        // PLATFORM_MODE / PLATFORM_VERSION environment variables are accepted as fallbacks.
+        val platformMode = providers.gradleProperty("platformMode")
+            .orElse(providers.environmentVariable("PLATFORM_MODE"))
+            .getOrElse("auto")
+        val platformVersion = providers.gradleProperty("platformVersion")
+            .orElse(providers.environmentVariable("PLATFORM_VERSION"))
+            .orNull
+        val localPath = providers.gradleProperty("platformLocalPath")
+            .orElse(providers.environmentVariable("PLATFORM_LOCAL_PATH"))
+            .orNull
+        val localPathExists = !localPath.isNullOrBlank() && File(localPath).isDirectory
+
+        when {
+            platformMode == "local" -> {
+                check(!localPath.isNullOrBlank()) {
+                    "platformMode=local requires -PplatformLocalPath=<installed IDE directory>"
+                }
+                local(localPath!!)
+            }
+
+            platformMode == "download-rider" -> create(
+                IntelliJPlatformType.Rider,
+                platformVersion ?: "2026.2.3.1"
+            )
+
+            platformMode == "intellij-idea" -> create(
+                IntelliJPlatformType.IntellijIdea,
+                platformVersion ?: "2026.2"
+            )
+
+            localPathExists -> local(localPath!!)
+
+            else -> {
+                logger.lifecycle(
+                    "platformLocalPath '$localPath' is not available; " +
+                        "downloading the IntelliJ IDEA platform for this build."
+                )
+                create(
+                    IntelliJPlatformType.IntellijIdea,
+                    platformVersion ?: "2026.2"
+                )
+            }
+        }
     }
 
     testImplementation(kotlin("test"))

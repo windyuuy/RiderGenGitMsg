@@ -45,6 +45,47 @@ $env:JAVA_HOME = "D:/Procs/IDESS/JetBrains/JetBrains Rider 2025.2.3/jbr"
 build/distributions/AIGenCommitMsg-0.6.0.zip
 ```
 
+### 平台选择（本地 / CI）
+
+[build.gradle.kts](build.gradle.kts) 通过 `platformMode` 切换 IntelliJ Platform SDK，也接受 `PLATFORM_MODE` / `PLATFORM_VERSION` / `PLATFORM_LOCAL_PATH` 环境变量：
+
+| 模式 | 示例 | 说明 |
+| --- | --- | --- |
+| `auto`（默认） | `.\gradlew.bat buildPlugin` | `platformLocalPath` 指向的目录存在时用本地 IDE，否则下载 IntelliJ IDEA |
+| `local` | `-PplatformMode=local -PplatformLocalPath="D:/path/to/Rider"` | 使用本机安装的 Rider 2026.2 |
+| `download-rider` | `-PplatformMode=download-rider -PplatformVersion=2026.2.3.1` | 从 JetBrains Maven 仓库下载 Rider 平台（约 **4 GB**，适合自托管 runner） |
+| `intellij-idea` | `-PplatformMode=intellij-idea -PplatformVersion=2026.2` | 下载 IntelliJ IDEA 2026.2 平台（约 **1.5–1.6 GB**，GitHub 托管 runner 推荐） |
+
+CI 选择 IntelliJ IDEA 的原因：Rider 平台 artifact 在 `intellij-repository` 中约 4 GB，托管 runner 下载 + 解压风险高；本插件只依赖 `com.intellij.modules.platform` 与 VCS API，产物声明 `since-build=262`，与 Rider 2026.2 同属 build 262，运行时兼容。注意 IntelliJ Platform Gradle Plugin 2.x 从 2025.3（253）起不再发布 `ideaIC` 坐标，必须使用统一的 `IntelliJPlatformType.IntellijIdea`（对应 `intellijIdea("2026.2")`），因此本项目不再使用旧的 `IntelliJIdeaCommunity` 类型。若必须用 Rider 平台验证，请用自托管 runner 执行 `download-rider`，或在本机用 `local`。
+
+## 发布流程
+
+1. 修改 [build.gradle.kts](build.gradle.kts) 中的 `version`（当前 `0.6.0`）；zip 前缀由 [settings.gradle.kts](settings.gradle.kts) 的 `rootProject.name = AIGenCommitMsg` 决定，两者不要改名。
+2. 提交并推送主分支：`git push origin main`。
+3. 打 tag（必须带 `v` 前缀，数字与 `version` 完全一致）：
+
+   ```powershell
+   git tag v0.6.0
+   git push origin v0.6.0
+   ```
+
+4. GitHub Actions 的 `Release` 工作流会被 `push: tags v*` 或 `release: published` 触发（也支持 `workflow_dispatch` 手动补发）：
+   - `prepare`：解析 tag、读取 `version` 与 `rootProject.name`；tag 与版本不一致时**直接失败**，不构建、不上传。
+   - `build`：`clean test buildPlugin verifyPluginStructure verifyPluginProjectConfiguration`，并校验 `build/distributions` 中唯一的 zip 文件名必须等于 `AIGenCommitMsg-X.Y.Z.zip`。
+   - 上传 Actions artifact（保留 14 天）并用 `gh release upload --clobber` 附加到 Release。
+   - 若该 Release 已存在同名 asset，`prepare` 会输出 `skip=true`，跳过构建与上传，避免同一版本被上传两次。
+5. 产物名固定为 `AIGenCommitMsg-X.Y.Z.zip`；tag 中的 `v` 不会进入文件名。
+
+发布前建议在本地用默认 `local` 模式预跑一遍：
+
+```powershell
+.\gradlew.bat clean test buildPlugin verifyPluginStructure
+```
+
+CI 与本地只在 IntelliJ Platform SDK 来源上不同（CI 用 `intellij-idea` 下载平台），任务本身一致。
+
+工作流使用仓库自带 `GITHUB_TOKEN`（`permissions: contents: write`），无需额外 PAT。
+
 ## 安装
 
 1. Rider：`Settings > Plugins`。

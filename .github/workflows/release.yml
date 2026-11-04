@@ -1,0 +1,155 @@
+name: Release
+
+# A tag push (v*) or a published GitHub Release both publish the plugin zip.
+# workflow_dispatch lets you re-publish an existing tag manually.
+# Concurrency serializes runs per tag, and the prepare job skips the build when the
+# release already contains AIGenCommitMsg-<version>.zip, so the asset is uploaded once.
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, e.g. v0.6.0"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  # IntelliJ IDEA 2026.2 shares platform build 262 with Rider 2026.2, and the plugin only
+  # depends on com.intellij.modules.platform. IntelliJPlatformType.IntellijIdea downloads
+  # ~1.5-1.6 GB instead of the ~4 GB Rider artifact, which keeps hosted runners reliable.
+  PLATFORM_MODE: intellij-idea
+  PLATFORM_VERSION: "2026.2"
+
+jobs:
+  prepare:
+    name: Validate tag and version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      zip: ${{ steps.meta.outputs.zip }}
+      skip: ${{ steps.meta.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # workflow_dispatch must check out the tag passed in the input, not the default branch.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve tag, compare versions and check existing assets
+        id: meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG="${EVENT_TAG:-${INPUT_TAG:-$REF_NAME}}"
+          if [[ "$TAG" != v* ]]; then
+            echo "::error::Release tag must start with 'v', got '$TAG'."
+            exit 1
+          fi
+
+          VERSION="$(sed -nE 's/^version = "([^"]+)".*/\1/p' build.gradle.kts | head -n1)"
+          PLUGIN_NAME="$(sed -nE 's/^rootProject\.name = "([^"]+)".*/\1/p' settings.gradle.kts | head -n1)"
+          if [[ -z "$VERSION" || -z "$PLUGIN_NAME" ]]; then
+            echo "::error::Could not read version (build.gradle.kts) or rootProject.name (settings.gradle.kts)."
+            exit 1
+          fi
+
+          TAG_VERSION="${TAG#v}"
+          if [[ "$TAG_VERSION" != "$VERSION" ]]; then
+            echo "::error::Tag '$TAG' (version '$TAG_VERSION') does not match build.gradle.kts version '$VERSION'. Bump the version and re-tag."
+            exit 1
+          fi
+
+          ZIP="${PLUGIN_NAME}-${VERSION}.zip"
+          SKIP=false
+          if gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$ZIP"; then
+            SKIP=true
+            echo "Release '$TAG' already has '$ZIP'; build and upload will be skipped."
+          fi
+
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "zip=$ZIP"
+            echo "skip=$SKIP"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and publish ${{ needs.prepare.outputs.zip }}
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # Rider 2026.2 ships JBR 25 (the project targets JVM 25), so CI uses Temurin 25.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: wrapper
+
+      - name: Build plugin
+        run: |
+          chmod +x gradlew
+          ./gradlew clean test buildPlugin verifyPluginStructure verifyPluginProjectConfiguration
+
+      - name: Verify artifact name
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ needs.prepare.outputs.zip }}"
+          mapfile -t ZIPS < <(find build/distributions -maxdepth 1 -name '*.zip' -printf '%f\n')
+          if [[ ${#ZIPS[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one zip in build/distributions, found: ${ZIPS[*]:-none}"
+            exit 1
+          fi
+          if [[ "${ZIPS[0]}" != "$EXPECTED" ]]; then
+            echo "::error::Built zip '${ZIPS[0]}' does not match expected '$EXPECTED'. Check rootProject.name and version."
+            exit 1
+          fi
+          echo "Artifact name verified: $EXPECTED"
+
+      # Keep the zip as a workflow artifact for debugging, even if the release upload fails.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.prepare.outputs.zip }}
+          path: build/distributions/${{ needs.prepare.outputs.zip }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach zip to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ZIP: ${{ needs.prepare.outputs.zip }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" "build/distributions/$ZIP" --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'

@@ -1,0 +1,38 @@
+<idea-plugin>
+    <id>dev.ridergen.gitmsg</id>
+    <name>RiderGenGitMsg</name>
+    <vendor>RiderGenGitMsg</vendor>
+
+    <description><![CDATA[
+        Generates a Git commit message from staged changes with the DeepSeek Chat Completions API
+        and inserts it into the Rider commit message field. The button is placed next to the
+        commit message history button. Supports Conventional Commits, Chinese/English output,
+        and an offline template fallback when no token is configured.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="RiderGenGitMsg" displayType="BALLOON"/>
+        <applicationConfigurable
+                parentId="tools"
+                id="dev.ridergen.gitmsg.settings"
+                displayName="RiderGenGitMsg (DeepSeek)"
+                instance="dev.ridergen.gitmsg.RiderGenConfigurable"/>
+        <applicationService serviceImplementation="dev.ridergen.gitmsg.RiderGenSettings"/>
+    </extensions>
+
+    <actions>
+        <action id="RiderGenGitMsg.GenerateCommitMessage"
+                class="dev.ridergen.gitmsg.GenerateCommitMessageAction"
+                text="Generate commit message with DeepSeek"
+                description="Generate a Git commit message from staged changes using DeepSeek">
+            <!-- Vcs.MessageActionGroup contains only Vcs.ShowMessageHistory (the clock icon),
+                 so anchoring after it puts this button immediately to its right. -->
+            <add-to-group group-id="Vcs.MessageActionGroup"
+                          anchor="after"
+                          relative-to-action="Vcs.ShowMessageHistory"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt G"/>
+        </action>
+    </actions>
+</idea-plugin>

@@ -15,8 +15,16 @@ class RiderGenSettings : PersistentStateComponent<RiderGenSettings.State> {
         /** Legacy plaintext token from 0.1.x. Migrated to PasswordSafe on Apply. */
         var apiKey: String = "",
         var temperature: Double = 0.2,
-        /** "zh" (Simplified Chinese) or "en". */
-        var responseLanguage: String = "zh",
+        /**
+         * Legacy 0.2–0.5 field: "zh" or "en". Only read during migration to [commitLanguage];
+         * an empty value (fresh install or after the first Apply in 0.6.0) means "not set".
+         */
+        var responseLanguage: String = "",
+        /**
+         * Commit-message language in the persisted `CC|EnglishName` form, e.g. `US|English`.
+         * Empty means "not chosen yet" and resolves through [CommitLanguages.resolve].
+         */
+        var commitLanguage: String = "",
         var conventionalCommits: Boolean = true,
         var maxDiffChars: Int = 24000,
         /**
@@ -24,7 +32,11 @@ class RiderGenSettings : PersistentStateComponent<RiderGenSettings.State> {
          * Empty means the built-in default behaviour is unchanged.
          */
         var customInstructions: String = ""
-    )
+    ) {
+        /** Effective language: new field first, then the legacy `zh`/`en` value, then US English. */
+        fun resolvedLanguage(): CommitLanguage =
+            CommitLanguages.resolve(commitLanguage, responseLanguage)
+    }
 
     private var myState = State()
 
@@ -38,6 +50,10 @@ class RiderGenSettings : PersistentStateComponent<RiderGenSettings.State> {
         }
         if (state.model.isBlank() || state.model == "gpt-4o-mini" || state.model == "gpt-4o") {
             state.model = DEFAULT_MODEL
+        }
+        // 0.2–0.5 persisted only responseLanguage ("zh"/"en"). Migrate it into the new field.
+        if (state.commitLanguage.isBlank()) {
+            state.commitLanguage = CommitLanguages.resolve("", state.responseLanguage).storageValue
         }
     }
 

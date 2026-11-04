@@ -5,8 +5,8 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.19.0"
 }
 
-group = "dev.ridergen"
-version = "0.3.0"
+group = "dev.gitmsg"
+version = "0.6.0"
 
 repositories {
     mavenCentral()
@@ -43,27 +43,46 @@ intellijPlatform {
     instrumentCode = false
 
     pluginConfiguration {
-        id = "dev.ridergen.gitmsg"
-        name = "RiderGenGitMsg"
+        id = "dev.gitmsg.ai.commithelper"
+        name = "AIGenCommitMsg"
         version = project.version.toString()
 
         description = """
-            Generates a Git commit message from staged changes (<code>git diff --cached</code>)
-            and inserts it into the Rider commit message field.
-            Uses the DeepSeek OpenAI-compatible Chat Completions API
-            (default base URL https://api.deepseek.com, model deepseek-chat),
-            stores the API token in the IDE PasswordSafe, and can fall back to a local template
-            when no token is configured.
+            <p>Generates a Git commit message from staged changes and inserts it into the commit message field.</p>
+            <p><b>Features</b></p>
+            <ul>
+              <li>One-click generation from the commit toolbar, right next to the commit message history button (default shortcut Ctrl+Alt+G).</li>
+              <li>DeepSeek Chat Completions API (default base URL https://api.deepseek.com, default model deepseek-chat), with configurable base URL, model, temperature, commit message language and Conventional Commits.</li>
+              <li>Custom generation rules appended to the system prompt with the highest priority.</li>
+              <li>API token stored in the IDE PasswordSafe, plus a built-in Test Connection button with readable errors for invalid token (401/403), insufficient balance (402), rate limit (429), timeout and network failures.</li>
+              <li>Searchable commit-message language picker with 200+ languages and region variants (CN, TW, US, GB, BR, PT, SA, JP and more), filtered by country code, English name or native name.</li>
+              <li>Offline template fallback when no API token is configured, so the action always works.</li>
+            </ul>
+            <p><b>Configuration</b></p>
+            <p>Open <code>Settings &gt; Tools &gt; AIGenCommitMsg (DeepSeek)</code>, paste a DeepSeek API token, optionally adjust the model or generation rules, and click Apply. The token is never written to project files.</p>
+            <p><b>Supported IDE</b></p>
+            <p>2026.2 and later (build 262+). Uses the standard VCS APIs and works with any Git repository.</p>
+        """.trimIndent()
+
+        changeNotes = """
+            <ul>
+              <li>0.6.0: multilingual commit-message language picker (200+ entries, searchable, random order), language-aware system prompt, legacy zh/en migration and English fallback notice.</li>
+              <li>0.5.0: renamed the display name to AIGenCommitMsg to keep it unique on Marketplace.</li>
+              <li>0.4.1: added plugin icons (SVG for IDE, 40px/80px PNG for Marketplace), real vendor link and Marketplace-ready description.</li>
+              <li>0.4.0: switched to a neutral plugin id for Marketplace compliance.</li>
+              <li>0.3.0: added custom commit-message rules and a restore-default-rules button.</li>
+              <li>0.2.0: DeepSeek-only generation, PasswordSafe token storage and token test button.</li>
+            </ul>
         """.trimIndent()
 
         ideaVersion {
             sinceBuild = "262"
-            untilBuild = "262.*"
+            // No untilBuild: the platform validator recommends forward compatibility for build 243+.
         }
 
         vendor {
-            name = "RiderGenGitMsg"
-            url = "https://github.com/ridergen"
+            name = "GitMsg AI"
+            url = "https://github.com/windyuuy/RiderGenGitMsg"
         }
     }
 }

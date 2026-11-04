@@ -98,7 +98,7 @@ class GenerateCommitMessageAction : AnAction(
                         snapshot.files,
                         snapshot.stat,
                         settings.conventionalCommits,
-                        settings.responseLanguage,
+                        settings.resolvedLanguage(),
                         settings.customInstructions
                     )
                     return
@@ -129,11 +129,20 @@ class GenerateCommitMessageAction : AnAction(
                 insertMessage(project, commitMessage, document, finalText)
 
                 when {
-                    usedLocalFallback -> notify(
-                        project,
-                        "未配置 DeepSeek API Token，已用本地模板生成。请在 Settings > Tools > RiderGenGitMsg (DeepSeek) 配置 Token。",
-                        NotificationType.WARNING
-                    )
+                    usedLocalFallback -> {
+                        val language = settings.resolvedLanguage()
+                        val fallbackNote = if (HeuristicCommitMessageGenerator.usesEnglishFallback(language)) {
+                            "\n当前所选语言「${language.englishName}」暂无本地模板，已使用英文模板生成；" +
+                                "配置 Token 后可获得该语言结果。"
+                        } else {
+                            ""
+                        }
+                        notify(
+                            project,
+                            "未配置 DeepSeek API Token，已用本地模板生成。请在 Settings > Tools > AIGenCommitMsg (DeepSeek) 配置 Token。$fallbackNote",
+                            NotificationType.WARNING
+                        )
+                    }
 
                     usedLegacyToken -> notify(
                         project,
@@ -164,7 +173,7 @@ class GenerateCommitMessageAction : AnAction(
             "提交信息输入框已有内容。DeepSeek 生成完成后如何处理？\n\n" +
                 "覆盖：替换现有内容\n" +
                 "追加：保留现有内容，空一行后追加生成结果",
-            "RiderGenGitMsg",
+            "AIGenCommitMsg",
             options,
             0,
             Messages.getQuestionIcon()
@@ -202,7 +211,7 @@ class GenerateCommitMessageAction : AnAction(
 
     private fun notify(project: Project, content: String, type: NotificationType) =
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("RiderGenGitMsg")
+            .getNotificationGroup("AICommitMessageGenerator")
             .createNotification(content, type)
             .also { it.notify(project) }
 

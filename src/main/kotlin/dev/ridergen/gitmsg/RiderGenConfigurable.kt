@@ -8,7 +8,6 @@ import com.intellij.util.ui.FormBuilder
 import java.awt.BorderLayout
 import javax.swing.JButton
 import javax.swing.JCheckBox
-import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -17,7 +16,7 @@ import javax.swing.JTextArea
 import javax.swing.JTextField
 
 /**
- * Settings > Tools > RiderGenGitMsg (DeepSeek).
+ * Settings > Tools > AIGenCommitMsg (DeepSeek).
  *
  * The token is loaded from / saved to the IDE PasswordSafe (CredentialStore) —
  * it is never written to ridergen-gitmsg.xml.
@@ -33,7 +32,15 @@ class RiderGenConfigurable : Configurable {
     private val statusLabel = JLabel(" ")
     private val temperatureField = JTextField(8)
     private val maxDiffCharsField = JTextField(10)
-    private val languageCombo = JComboBox(arrayOf("中文（zh）", "English（en）"))
+    private val languageChooser = LanguageChooser(CommitLanguages.DEFAULT)
+    private val languageHintLabel = JLabel(
+        "<html><body style='width: 540px'>语言列表顺序为随机排列，与语言热度、推荐程度或任何其它因素无关。" +
+            "点击下拉框可按国家代码、英文名或本土名搜索。</body></html>"
+    )
+    private val languageRow = JPanel(BorderLayout(0, 4)).apply {
+        add(languageChooser, BorderLayout.NORTH)
+        add(languageHintLabel, BorderLayout.CENTER)
+    }
     private val conventionalCommitsBox =
         JCheckBox("Use Conventional Commits style (type(scope): subject)")
     private val instructionsArea = JTextArea(6, 40).apply {
@@ -57,7 +64,7 @@ class RiderGenConfigurable : Configurable {
     private val settings: RiderGenSettings
         get() = RiderGenSettings.getInstance()
 
-    override fun getDisplayName(): String = "RiderGenGitMsg (DeepSeek)"
+    override fun getDisplayName(): String = "AIGenCommitMsg (DeepSeek)"
 
     override fun createComponent(): JComponent {
         if (panel == null) {
@@ -80,7 +87,7 @@ class RiderGenConfigurable : Configurable {
                 .addLabeledComponent("Model:", modelField)
                 .addLabeledComponent("DeepSeek API Token:", tokenArea)
                 .addLabeledComponent("Temperature (0-2):", temperatureField)
-                .addLabeledComponent("响应语言 / Response language:", languageCombo)
+                .addLabeledComponent("提交信息语言 / Commit message language:", languageRow)
                 .addComponent(conventionalCommitsBox)
                 .addLabeledComponent("Max diff characters:", maxDiffCharsField)
                 .addLabeledComponent("生成规则 / 额外提示词:", instructionsScroll)
@@ -103,7 +110,7 @@ class RiderGenConfigurable : Configurable {
             token != loadedToken ||
             temperatureField.text.trim().toDoubleOrNull() != state.temperature ||
             maxDiffCharsField.text.trim().toIntOrNull() != state.maxDiffChars ||
-            languageCombo.selectedIndex != (if (state.responseLanguage == "en") 1 else 0) ||
+            languageChooser.selectedLanguage.storageValue != state.resolvedLanguage().storageValue ||
             conventionalCommitsBox.isSelected != state.conventionalCommits ||
             instructionsArea.text.trim() != state.customInstructions.trim() ||
             legacyTokenPending
@@ -111,13 +118,14 @@ class RiderGenConfigurable : Configurable {
 
     override fun apply() {
         val token = String(tokenField.password).trim()
-        val language = if (languageCombo.selectedIndex == 1) "en" else "zh"
+        val language = languageChooser.selectedLanguage
 
         settings.update { state ->
             state.baseUrl = baseUrlField.text.trim().ifBlank { RiderGenSettings.DEFAULT_BASE_URL }
             state.model = modelField.text.trim().ifBlank { RiderGenSettings.DEFAULT_MODEL }
             state.temperature = (temperatureField.text.trim().toDoubleOrNull() ?: 0.2).coerceIn(0.0, 2.0)
-            state.responseLanguage = language
+            state.responseLanguage = ""
+            state.commitLanguage = language.storageValue
             state.conventionalCommits = conventionalCommitsBox.isSelected
             state.maxDiffChars = (maxDiffCharsField.text.trim().toIntOrNull() ?: 24000)
                 .coerceIn(2000, 200_000)
@@ -139,7 +147,8 @@ class RiderGenConfigurable : Configurable {
         modelField.text = state.model.ifBlank { RiderGenSettings.DEFAULT_MODEL }
         temperatureField.text = state.temperature.toString()
         maxDiffCharsField.text = state.maxDiffChars.toString()
-        languageCombo.selectedIndex = if (state.responseLanguage == "en") 1 else 0
+        languageChooser.select(state.resolvedLanguage())
+        languageChooser.reshuffle()
         conventionalCommitsBox.isSelected = state.conventionalCommits
         instructionsArea.text = state.customInstructions
         instructionsArea.caretPosition = 0

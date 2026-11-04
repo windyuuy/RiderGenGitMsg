@@ -12,10 +12,10 @@ object HeuristicCommitMessageGenerator {
         files: List<ChangedFile>,
         stat: String,
         conventional: Boolean,
-        responseLanguage: String = "en",
+        language: CommitLanguage = CommitLanguages.DEFAULT,
         customInstructions: String = ""
     ): String {
-        val preferences = resolvePreferences(conventional, responseLanguage, customInstructions)
+        val preferences = resolvePreferences(conventional, language, customInstructions)
 
         if (files.isEmpty()) {
             return when {
@@ -52,21 +52,36 @@ object HeuristicCommitMessageGenerator {
     )
 
     /**
+     * True when the offline template has native text for this language: any Chinese variant
+     * or any English variant. Everything else falls back to English.
+     */
+    fun supports(language: CommitLanguage): Boolean = isChinese(language) || isEnglish(language)
+
+    /** All languages without a native offline template are rendered in English. */
+    fun usesEnglishFallback(language: CommitLanguage): Boolean = !supports(language)
+
+    private fun isChinese(language: CommitLanguage): Boolean =
+        language.englishName.contains("Chinese", ignoreCase = true)
+
+    private fun isEnglish(language: CommitLanguage): Boolean =
+        language.englishName.contains("English", ignoreCase = true)
+
+    /**
      * Best-effort interpretation of free-form custom instructions for the offline fallback.
      * The AI path sends the raw rules to DeepSeek; here we only honour explicit language,
      * Conventional-prefix, scope and body intent so the fallback stays reasonably aligned.
      */
     private fun resolvePreferences(
         conventional: Boolean,
-        responseLanguage: String,
+        language: CommitLanguage,
         customInstructions: String
     ): Preferences {
         val text = customInstructions.lowercase()
 
         val chinese = when {
-            containsAny(text, "简体中文", "中文", "汉语", "chinese") -> true
+            containsAny(text, "简体中文", "繁体中文", "中文", "汉语", "chinese") -> true
             containsAny(text, "english", "英文", "英语") -> false
-            else -> !responseLanguage.equals("en", ignoreCase = true)
+            else -> isChinese(language)
         }
 
         val supportConventional = when {

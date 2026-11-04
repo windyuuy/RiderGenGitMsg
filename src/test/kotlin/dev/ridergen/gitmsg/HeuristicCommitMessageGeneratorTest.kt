@@ -114,7 +114,7 @@ class HeuristicCommitMessageGeneratorTest {
             listOf(ChangedFile("M", "README.md")),
             "",
             conventional = true,
-            responseLanguage = "zh",
+            language = chineseSimplified(),
             customInstructions = "请用英文写提交信息"
         )
 
@@ -128,7 +128,7 @@ class HeuristicCommitMessageGeneratorTest {
             listOf(ChangedFile("A", "game/Player.cs")),
             "",
             conventional = true,
-            responseLanguage = "en",
+            language = CommitLanguages.DEFAULT,
             customInstructions = "不要使用 Conventional Commits，不加前缀"
         )
 
@@ -143,10 +143,45 @@ class HeuristicCommitMessageGeneratorTest {
             listOf(ChangedFile("A", "game/Player.cs")),
             " game/Player.cs | 10 ++++++++++",
             conventional = true,
-            responseLanguage = "en",
+            language = CommitLanguages.DEFAULT,
             customInstructions = "only a subject, no body"
         )
 
         assertEquals(1, message.lines().size, message)
     }
+
+    @Test
+    fun `chinese variants use the chinese template`() {
+        val variants = listOf(
+            chineseSimplified(),
+            CommitLanguages.find("TW", "Chinese (Traditional)")!!,
+            CommitLanguages.find("HK", "Chinese (Traditional, Hong Kong)")!!
+        )
+        variants.forEach { language ->
+            assertEquals(
+                "chore: 没有已暂存改动",
+                HeuristicCommitMessageGenerator.generate(
+                    emptyList(), "", conventional = true, language = language
+                ),
+                language.displayLabel()
+            )
+        }
+    }
+
+    @Test
+    fun `languages without a template fall back to english`() {
+        val japanese = CommitLanguages.find("JP", "Japanese")!!
+        assertTrue(HeuristicCommitMessageGenerator.usesEnglishFallback(japanese))
+        assertEquals(
+            "chore: no staged changes",
+            HeuristicCommitMessageGenerator.generate(
+                emptyList(), "", conventional = true, language = japanese
+            )
+        )
+        assertTrue(HeuristicCommitMessageGenerator.supports(chineseSimplified()))
+        assertTrue(HeuristicCommitMessageGenerator.supports(CommitLanguages.find("GB", "English (UK)")!!))
+    }
+
+    private fun chineseSimplified(): CommitLanguage =
+        CommitLanguages.find("CN", "Chinese (Simplified)")!!
 }

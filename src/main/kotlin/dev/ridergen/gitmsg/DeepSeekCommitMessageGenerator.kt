@@ -278,17 +278,13 @@ object DeepSeekCommitMessageGenerator {
      * Builds the system prompt.
      *
      * Priority: user-supplied [RiderGenSettings.State.customInstructions] are placed first and
-     * explicitly declared highest priority; the response language and Conventional Commits
+     * explicitly declared highest priority; the selected commit language and Conventional Commits
      * switch only provide defaults for points the user rules do not cover.
      *
-     * Blank custom instructions keep the exact 0.2.0 prompt, so existing behaviour is unchanged.
+     * Blank custom instructions keep the default prompt (only the language line follows the picker).
      */
     internal fun buildSystemPrompt(settings: RiderGenSettings.State): String {
-        val language = if (settings.responseLanguage.equals("en", ignoreCase = true)) {
-            "English"
-        } else {
-            "Simplified Chinese"
-        }
+        val language = CommitLanguages.promptName(settings.resolvedLanguage())
         val userRules = settings.customInstructions.trim()
 
         if (userRules.isEmpty()) {
@@ -311,7 +307,7 @@ object DeepSeekCommitMessageGenerator {
             append("\n\nUser rules (highest priority; override the defaults below when they conflict):\n")
             append(userRules)
             append("\n\nDefaults (apply only where the user rules above do not specify):\n")
-            append("- Write the commit message in $language.\n")
+            append("- Write the commit message in $language (unless the user rules above specify a different language).\n")
             if (settings.conventionalCommits) {
                 append("- Use Conventional Commits format: <type>(<scope>): <subject>, followed by an optional body. ")
                 append("Allowed types are feat, fix, docs, style, refactor, perf, test, build, ci, chore and revert.\n")

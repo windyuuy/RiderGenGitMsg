@@ -222,12 +222,57 @@ class DeepSeekCommitMessageGeneratorTest {
     }
 
     @Test
-    fun `blank custom rules keep the existing conventional prompt`() {
+    fun `blank custom rules keep the default prompt with english`() {
         val prompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(RiderGenSettings.State())
 
         assertFalse(prompt.contains("User rules"))
-        assertTrue(prompt.contains("Write the commit message in Simplified Chinese"))
+        assertTrue(prompt.contains("Write the commit message in English"))
         assertTrue(prompt.contains("Conventional Commits format"))
+    }
+
+    @Test
+    fun `selected language is written into the system prompt with native name`() {
+        val chinese = CommitLanguages.find("CN", "Chinese (Simplified)")!!
+        val prompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(
+            RiderGenSettings.State(commitLanguage = chinese.storageValue)
+        )
+        assertTrue(prompt.contains("Write the commit message in Chinese (Simplified) (简体中文)"), prompt)
+
+        val arabic = CommitLanguages.find("SA", "Arabic")!!
+        val arabicPrompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(
+            RiderGenSettings.State(commitLanguage = arabic.storageValue)
+        )
+        assertTrue(arabicPrompt.contains("Write the commit message in Arabic (العربية)"), arabicPrompt)
+
+        val japanese = CommitLanguages.find("JP", "Japanese")!!
+        val japanesePrompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(
+            RiderGenSettings.State(commitLanguage = japanese.storageValue)
+        )
+        assertTrue(japanesePrompt.contains("Write the commit message in Japanese (日本語)"), japanesePrompt)
+    }
+
+    @Test
+    fun `legacy response language still drives the system prompt`() {
+        val prompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(
+            RiderGenSettings.State(commitLanguage = "", responseLanguage = "zh")
+        )
+        assertTrue(prompt.contains("Write the commit message in Chinese (Simplified) (简体中文)"), prompt)
+    }
+
+    @Test
+    fun `custom language rules keep their highest priority over the picker`() {
+        val prompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(
+            RiderGenSettings.State(
+                commitLanguage = CommitLanguages.find("JP", "Japanese")!!.storageValue,
+                customInstructions = "Always write the commit message in German."
+            )
+        )
+        assertTrue(prompt.contains("German"), prompt)
+        assertTrue(prompt.contains("highest priority"), prompt)
+        assertTrue(
+            prompt.contains("unless the user rules above specify a different language"),
+            prompt
+        )
     }
 
     @Test

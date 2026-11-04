@@ -5,4 +5,4 @@ pluginManagement {
     }
 }
 
-rootProject.name = "RiderGenGitMsg"
+rootProject.name = "AIGenCommitMsg"

@@ -97,7 +97,9 @@ class GenerateCommitMessageAction : AnAction(
                     generated = HeuristicCommitMessageGenerator.generate(
                         snapshot.files,
                         snapshot.stat,
-                        settings.conventionalCommits
+                        settings.conventionalCommits,
+                        settings.responseLanguage,
+                        settings.customInstructions
                     )
                     return
                 }

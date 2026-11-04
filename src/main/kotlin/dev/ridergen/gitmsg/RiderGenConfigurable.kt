@@ -3,6 +3,7 @@ package dev.ridergen.gitmsg
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.Configurable
 import com.intellij.ui.JBColor
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.FormBuilder
 import java.awt.BorderLayout
 import javax.swing.JButton
@@ -12,6 +13,7 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JPasswordField
+import javax.swing.JTextArea
 import javax.swing.JTextField
 
 /**
@@ -34,6 +36,18 @@ class RiderGenConfigurable : Configurable {
     private val languageCombo = JComboBox(arrayOf("中文（zh）", "English（en）"))
     private val conventionalCommitsBox =
         JCheckBox("Use Conventional Commits style (type(scope): subject)")
+    private val instructionsArea = JTextArea(6, 40).apply {
+        lineWrap = true
+        wrapStyleWord = true
+    }
+    private val instructionsScroll = JBScrollPane(instructionsArea)
+    private val restoreDefaultsButton =
+        JButton("恢复默认规则").apply { addActionListener { restoreDefaultInstructions() } }
+    private val instructionsHintLabel = JLabel(
+        "<html><body style='width: 540px'>会作为 system 提示的一部分发送给 DeepSeek。" +
+            "留空则保持现有默认行为；自定义规则优先级最高，Conventional 开关与响应语言" +
+            "只在规则未覆盖时提供默认格式。</body></html>"
+    )
     private val hintLabel = JLabel()
 
     private var loadedToken: String = ""
@@ -56,6 +70,11 @@ class RiderGenConfigurable : Configurable {
                 add(statusLabel, BorderLayout.CENTER)
             }
 
+            val instructionsFooter = JPanel(BorderLayout(8, 0)).apply {
+                add(restoreDefaultsButton, BorderLayout.WEST)
+                add(instructionsHintLabel, BorderLayout.CENTER)
+            }
+
             panel = FormBuilder.createFormBuilder()
                 .addLabeledComponent("Base URL:", baseUrlField)
                 .addLabeledComponent("Model:", modelField)
@@ -64,6 +83,8 @@ class RiderGenConfigurable : Configurable {
                 .addLabeledComponent("响应语言 / Response language:", languageCombo)
                 .addComponent(conventionalCommitsBox)
                 .addLabeledComponent("Max diff characters:", maxDiffCharsField)
+                .addLabeledComponent("生成规则 / 额外提示词:", instructionsScroll)
+                .addComponent(instructionsFooter)
                 .addComponent(hintLabel)
                 .addComponentFillVertically(JPanel(), 0)
                 .panel
@@ -84,6 +105,7 @@ class RiderGenConfigurable : Configurable {
             maxDiffCharsField.text.trim().toIntOrNull() != state.maxDiffChars ||
             languageCombo.selectedIndex != (if (state.responseLanguage == "en") 1 else 0) ||
             conventionalCommitsBox.isSelected != state.conventionalCommits ||
+            instructionsArea.text.trim() != state.customInstructions.trim() ||
             legacyTokenPending
     }
 
@@ -99,6 +121,7 @@ class RiderGenConfigurable : Configurable {
             state.conventionalCommits = conventionalCommitsBox.isSelected
             state.maxDiffChars = (maxDiffCharsField.text.trim().toIntOrNull() ?: 24000)
                 .coerceIn(2000, 200_000)
+            state.customInstructions = instructionsArea.text.trim()
             // Migrated to PasswordSafe below; never keep it in the XML again.
             state.apiKey = ""
         }
@@ -118,6 +141,8 @@ class RiderGenConfigurable : Configurable {
         maxDiffCharsField.text = state.maxDiffChars.toString()
         languageCombo.selectedIndex = if (state.responseLanguage == "en") 1 else 0
         conventionalCommitsBox.isSelected = state.conventionalCommits
+        instructionsArea.text = state.customInstructions
+        instructionsArea.caretPosition = 0
 
         val stored = try {
             DeepSeekTokenStore.read()
@@ -147,6 +172,14 @@ class RiderGenConfigurable : Configurable {
     override fun disposeUIResources() {
         panel = null
         testInProgress = false
+    }
+
+    /**
+     * Only fills the editor; persistence happens when the user presses Apply.
+     */
+    private fun restoreDefaultInstructions() {
+        instructionsArea.text = RiderGenSettings.DEFAULT_INSTRUCTIONS
+        instructionsArea.caretPosition = 0
     }
 
     private fun runTokenTest() {

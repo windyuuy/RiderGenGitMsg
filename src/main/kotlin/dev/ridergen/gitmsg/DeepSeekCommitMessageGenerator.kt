@@ -241,29 +241,13 @@ object DeepSeekCommitMessageGenerator {
             ?.asString
     }.getOrNull()?.takeIf { it.isNotBlank() }
 
-    private fun buildRequestBody(
+    internal fun buildRequestBody(
         settings: RiderGenSettings.State,
         snapshot: StagedSnapshot,
         diff: String,
         model: String
     ): String {
-        val language = if (settings.responseLanguage.equals("en", ignoreCase = true)) {
-            "English"
-        } else {
-            "Simplified Chinese"
-        }
-
-        val systemPrompt = buildString {
-            append("You write Git commit messages for a JetBrains Rider project. ")
-            append("Return ONLY the commit message text, with no markdown fences, quotes or explanations. ")
-            append("Write the commit message in $language. ")
-            if (settings.conventionalCommits) {
-                append("Use Conventional Commits format: <type>(<scope>): <subject>, followed by an optional body. ")
-                append("Allowed types are feat, fix, docs, style, refactor, perf, test, build, ci, chore and revert.")
-            } else {
-                append("Use a concise imperative subject line of at most 72 characters, followed by an optional body.")
-            }
-        }
+        val systemPrompt = buildSystemPrompt(settings)
 
         val userPrompt = buildString {
             append("Staged files (status<TAB>path):\n")
@@ -288,6 +272,54 @@ object DeepSeekCommitMessageGenerator {
             addProperty("stream", false)
             add("messages", messages)
         }.toString()
+    }
+
+    /**
+     * Builds the system prompt.
+     *
+     * Priority: user-supplied [RiderGenSettings.State.customInstructions] are placed first and
+     * explicitly declared highest priority; the response language and Conventional Commits
+     * switch only provide defaults for points the user rules do not cover.
+     *
+     * Blank custom instructions keep the exact 0.2.0 prompt, so existing behaviour is unchanged.
+     */
+    internal fun buildSystemPrompt(settings: RiderGenSettings.State): String {
+        val language = if (settings.responseLanguage.equals("en", ignoreCase = true)) {
+            "English"
+        } else {
+            "Simplified Chinese"
+        }
+        val userRules = settings.customInstructions.trim()
+
+        if (userRules.isEmpty()) {
+            return buildString {
+                append("You write Git commit messages for a JetBrains Rider project. ")
+                append("Return ONLY the commit message text, with no markdown fences, quotes or explanations. ")
+                append("Write the commit message in $language. ")
+                if (settings.conventionalCommits) {
+                    append("Use Conventional Commits format: <type>(<scope>): <subject>, followed by an optional body. ")
+                    append("Allowed types are feat, fix, docs, style, refactor, perf, test, build, ci, chore and revert.")
+                } else {
+                    append("Use a concise imperative subject line of at most 72 characters, followed by an optional body.")
+                }
+            }
+        }
+
+        return buildString {
+            append("You write Git commit messages for a JetBrains Rider project. ")
+            append("Return ONLY the commit message text, with no markdown fences, quotes or explanations.")
+            append("\n\nUser rules (highest priority; override the defaults below when they conflict):\n")
+            append(userRules)
+            append("\n\nDefaults (apply only where the user rules above do not specify):\n")
+            append("- Write the commit message in $language.\n")
+            if (settings.conventionalCommits) {
+                append("- Use Conventional Commits format: <type>(<scope>): <subject>, followed by an optional body. ")
+                append("Allowed types are feat, fix, docs, style, refactor, perf, test, build, ci, chore and revert.\n")
+            } else {
+                append("- Use a concise imperative subject line of at most 72 characters, followed by an optional body.\n")
+            }
+            append("- Never invent changes, files, issues or breaking changes that are not visible in the diff.\n")
+        }
     }
 
     private fun message(role: String, content: String): JsonObject = JsonObject().apply {

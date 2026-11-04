@@ -18,7 +18,12 @@ class RiderGenSettings : PersistentStateComponent<RiderGenSettings.State> {
         /** "zh" (Simplified Chinese) or "en". */
         var responseLanguage: String = "zh",
         var conventionalCommits: Boolean = true,
-        var maxDiffChars: Int = 24000
+        var maxDiffChars: Int = 24000,
+        /**
+         * Extra user instructions appended to the system prompt as the highest-priority rules.
+         * Empty means the built-in default behaviour is unchanged.
+         */
+        var customInstructions: String = ""
     )
 
     private var myState = State()
@@ -46,6 +51,18 @@ class RiderGenSettings : PersistentStateComponent<RiderGenSettings.State> {
     companion object {
         const val DEFAULT_BASE_URL = "https://api.deepseek.com"
         const val DEFAULT_MODEL = "deepseek-chat"
+
+        /**
+         * Text filled in by the settings page "恢复默认规则" button.
+         * It is NOT applied automatically — the user must press Apply to persist it.
+         */
+        val DEFAULT_INSTRUCTIONS: String = """
+            - First line: a short imperative summary, at most 72 characters, no trailing period.
+            - If Conventional Commits is enabled, use a suitable type prefix (feat, fix, docs, refactor, test, build, ci, chore); omit the scope when it is unclear.
+            - Keep the body optional and short: 1-5 lines explaining why or impact, not a file-by-file diff dump.
+            - Never invent files, features, issues or breaking changes that are not visible in the diff.
+            - Do not output markdown fences, quotes, signatures or emojis.
+        """.trimIndent()
 
         fun getInstance(): RiderGenSettings =
             ApplicationManager.getApplication().getService(RiderGenSettings::class.java)

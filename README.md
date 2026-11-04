@@ -20,7 +20,7 @@ JetBrains Rider 插件：根据 **已暂存改动**（`git diff --cached`）调�
 | Kotlin | 2.4.0 |
 | IntelliJ Platform Gradle Plugin | 2.19.0 |
 | 插件兼容范围 | `since-build=262`，`until-build=262.*` |
-| 插件版本 | 0.2.0 |
+| 插件版本 | 0.3.0 |
 
 > 安装目录名可能仍是 `JetBrains Rider 2025.2.3`，但其中的 `product-info.json` 实际报告 `2026.2.3.1`（build 262）。本地平台路径在 [gradle.properties](gradle.properties) 的 `platformLocalPath` 中配置；在其他机器构建时改成对应的 Rider 2026.2 安装目录，或执行：
 >
@@ -40,14 +40,14 @@ $env:JAVA_HOME = "D:/Procs/IDESS/JetBrains/JetBrains Rider 2025.2.3/jbr"
 产物：
 
 ```
-build/distributions/RiderGenGitMsg-0.2.0.zip
+build/distributions/RiderGenGitMsg-0.3.0.zip
 ```
 
 ## 安装
 
 1. Rider：`Settings > Plugins`。
 2. 齿轮菜单 → `Install Plugin from Disk...`。
-3. 选择 `build/distributions/RiderGenGitMsg-0.2.0.zip`。
+3. 选择 `build/distributions/RiderGenGitMsg-0.3.0.zip`。
 4. 重启 IDE。
 
 ## 配置 DeepSeek
@@ -63,6 +63,44 @@ build/distributions/RiderGenGitMsg-0.2.0.zip
 | 响应语言 | 中文 | 中文（zh）/ English（en） |
 | Use Conventional Commits | 开启 | `type(scope): subject` 格式 |
 | Max diff characters | `24000` | 发送给模型的 diff 最大字符数 |
+| 生成规则 / 额外提示词 | 空 | 多行可滚动文本框。作为 **system 提示**的一部分发送给 DeepSeek；留空保持原有默认行为，非空时优先级最高 |
+
+### 生成规则 / 额外提示词
+
+设置页字段名为 **「生成规则 / 额外提示词:」**，位于 `Max diff characters` 下方，是多行可滚动文本区。
+
+- 非空内容会原样拼入 DeepSeek 请求的 **system message**（不会存入凭据库，只保存在 `ridergen-gitmsg.xml`）。
+- 空值时不会出现额外规则段落，请求与 0.2.0 的默认行为一致。
+- 「恢复默认规则」按钮只把内置规则填回输入框，**不会自动保存**；需要点击 **Apply** 才持久化。
+- 优先级：
+  1. 用户自定义规则（最高优先级，提示中明确声明会覆盖默认项）。
+  2. 响应语言（中文 / English）与 Conventional Commits 开关，仅作为“用户规则未覆盖时”的默认格式。
+- 因此，如果自定义规则写了“用英文”“不要 Conventional 前缀”等，模型会以自定义规则为准；开关只负责补齐未提及的方面。
+
+内置默认规则（点击「恢复默认规则」后填入的内容）：
+
+```text
+- First line: a short imperative summary, at most 72 characters, no trailing period.
+- If Conventional Commits is enabled, use a suitable type prefix (feat, fix, docs, refactor, test, build, ci, chore); omit the scope when it is unclear.
+- Keep the body optional and short: 1-5 lines explaining why or impact, not a file-by-file diff dump.
+- Never invent files, features, issues or breaking changes that are not visible in the diff.
+- Do not output markdown fences, quotes, signatures or emojis.
+```
+
+示例提示词：
+
+```text
+使用简体中文。首行不超过 50 字，采用祈使句。
+必须带 Conventional 前缀，scope 使用模块目录名。
+body 用 2-4 条要点说明“为什么”，不要逐文件罗列。
+不要添加表情符号或签名。
+```
+
+```text
+Write in English. Start the subject with "[RiderGen]" and keep it under 60 characters.
+Always include a body with exactly one line: "Impact: <one sentence>".
+Never mention file names.
+```
 
 ### 测试连接按钮
 
@@ -83,7 +121,7 @@ Token 输入框右侧的「测试连接」按钮：
 ### Token 存储
 
 - 新版本 Token 写入 `PasswordSafe.instance`（IDE 凭据存储 / 系统钥匙串），service name 为 `RiderGenGitMsg`，key 为 `DeepSeek API Token`。
-- `ridergen-gitmsg.xml` 中只保留 Base URL、Model、温度、语言、Conventional Commits、最大 diff 长度等非敏感配置。
+- `ridergen-gitmsg.xml` 中只保留 Base URL、Model、温度、语言、Conventional Commits、最大 diff 长度、自定义生成规则等非敏感配置。
 - 从 0.1.x 升级时，若 PasswordSafe 中还没有 Token，会临时回退到旧 XML 里的明文 `apiKey` 并在设置页提示迁移；点击 **Apply** 后 Token 写入 PasswordSafe，同时清空 XML 中的明文值。
 
 ## 使用
@@ -133,7 +171,11 @@ Token 输入框右侧的「测试连接」按钮：
 单元测试覆盖：
 
 - 本地模板生成、`--name-status` 解析、subject 截断。
+- 本地模板按自定义规则中的语言 / 前缀 / body 意图调整输出。
 - DeepSeek Chat Completions 成功响应解析。
+- 自定义规则确实被拼进请求体（system message），并带有最高优先级声明。
+- 空规则时 system 提示与原有默认行为一致（Conventional / 纯文本两种分支）。
+- 内置默认规则非空、内容完整，且作为自定义规则时能进入提示。
 - `GET /models` Token 检测成功与模型列表解析。
 - 401/403、402、429、网络不可达、200 非 JSON、缺少 `choices` 等错误分支。
 - endpoint / models endpoint 归一化。
@@ -149,3 +191,6 @@ Token 输入框右侧的「测试连接」按钮：
 - DeepSeek 请求在后台线程执行，但 HTTP 请求本身不可取消；点击任务进度条的取消只会停止等待。
 - 若生成期间关闭项目或提交对话框，结果可能不会写入输入框。
 - 若 IDE 运行环境无法访问系统钥匙串，PasswordSafe 可能退回内存存储，重启后需重新输入 Token。
+- 自定义规则只做**关键词级**的本地模板适配（语言、是否使用 Conventional 前缀、scope、body）；复杂格式要求只在 DeepSeek 路径生效，未配置 Token 时无法完整复刻。
+- 「恢复默认规则」只填充输入框，必须点击 Apply 才会保存；关闭设置页前未 Apply 的修改会丢失。
+- UI 交互（按钮填充/禁用状态）由人工验证，单元测试覆盖的是提示词拼接、默认规则内容和本地模板适配。

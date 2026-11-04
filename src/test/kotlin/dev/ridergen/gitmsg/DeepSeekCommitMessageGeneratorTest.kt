@@ -1,5 +1,6 @@
 package dev.ridergen.gitmsg
 
+import com.google.gson.JsonParser
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
@@ -184,6 +185,76 @@ class DeepSeekCommitMessageGeneratorTest {
         } finally {
             server.stop(0)
         }
+    }
+
+    @Test
+    fun `custom rules are embedded in the system message and take priority`() {
+        var capturedBody: String? = null
+        val server = startServer { exchange ->
+            capturedBody = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
+            respond(
+                exchange,
+                200,
+                """{"choices":[{"message":{"role":"assistant","content":"feat: test"}}]}"""
+            )
+        }
+        try {
+            val rules = "RULE-MARKER: always add a short body and use English."
+            val settings = RiderGenSettings.State(
+                baseUrl = "http://127.0.0.1:${server.address.port}",
+                customInstructions = rules
+            )
+            DeepSeekCommitMessageGenerator.generate(settings, snapshot, "sk-test")
+
+            val request = JsonParser.parseString(capturedBody ?: error("request body not captured"))
+                .asJsonObject
+            val systemContent = request.getAsJsonArray("messages")[0]
+                .asJsonObject
+                .get("content")
+                .asString
+
+            assertTrue(systemContent.contains(rules), systemContent)
+            assertTrue(systemContent.contains("highest priority"), systemContent)
+            assertTrue(systemContent.contains("Defaults"), systemContent)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `blank custom rules keep the existing conventional prompt`() {
+        val prompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(RiderGenSettings.State())
+
+        assertFalse(prompt.contains("User rules"))
+        assertTrue(prompt.contains("Write the commit message in Simplified Chinese"))
+        assertTrue(prompt.contains("Conventional Commits format"))
+    }
+
+    @Test
+    fun `blank custom rules keep the existing plain prompt`() {
+        val prompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(
+            RiderGenSettings.State(conventionalCommits = false, responseLanguage = "en")
+        )
+
+        assertFalse(prompt.contains("User rules"))
+        assertTrue(prompt.contains("Write the commit message in English"))
+        assertTrue(prompt.contains("concise imperative subject line"))
+    }
+
+    @Test
+    fun `default instructions are substantive and feed the prompt`() {
+        val defaults = RiderGenSettings.DEFAULT_INSTRUCTIONS
+        assertTrue(defaults.isNotBlank())
+        assertTrue(defaults.contains("72"))
+        assertTrue(defaults.contains("imperative"))
+        assertTrue(defaults.contains("Conventional Commits"))
+        assertTrue(defaults.contains("Never invent"))
+
+        val prompt = DeepSeekCommitMessageGenerator.buildSystemPrompt(
+            RiderGenSettings.State(customInstructions = defaults)
+        )
+        assertTrue(prompt.contains(defaults.trim()))
+        assertTrue(prompt.contains("highest priority"))
     }
 
     @Test

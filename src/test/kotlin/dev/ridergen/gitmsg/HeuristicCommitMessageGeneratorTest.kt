@@ -107,4 +107,46 @@ class HeuristicCommitMessageGeneratorTest {
         assertEquals(20, result.length)
         assertTrue(result.endsWith("..."))
     }
+
+    @Test
+    fun `fallback respects a custom rule asking for english`() {
+        val message = HeuristicCommitMessageGenerator.generate(
+            listOf(ChangedFile("M", "README.md")),
+            "",
+            conventional = true,
+            responseLanguage = "zh",
+            customInstructions = "请用英文写提交信息"
+        )
+
+        assertTrue(message.lineSequence().first().startsWith("docs: update README.md"), message)
+        assertTrue(message.contains("Changed files:"))
+    }
+
+    @Test
+    fun `fallback respects a custom rule disabling the conventional prefix`() {
+        val message = HeuristicCommitMessageGenerator.generate(
+            listOf(ChangedFile("A", "game/Player.cs")),
+            "",
+            conventional = true,
+            responseLanguage = "en",
+            customInstructions = "不要使用 Conventional Commits，不加前缀"
+        )
+
+        val header = message.lineSequence().first()
+        assertTrue(header.startsWith("Add Player.cs"), header)
+        assertTrue(!header.contains("feat"), header)
+    }
+
+    @Test
+    fun `fallback respects a custom rule omitting the body`() {
+        val message = HeuristicCommitMessageGenerator.generate(
+            listOf(ChangedFile("A", "game/Player.cs")),
+            " game/Player.cs | 10 ++++++++++",
+            conventional = true,
+            responseLanguage = "en",
+            customInstructions = "only a subject, no body"
+        )
+
+        assertEquals(1, message.lines().size, message)
+    }
 }

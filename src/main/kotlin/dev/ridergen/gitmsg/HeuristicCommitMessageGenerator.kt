@@ -8,24 +8,103 @@ import dev.ridergen.gitmsg.ChangedFile.ChangeKind
  */
 object HeuristicCommitMessageGenerator {
 
-    fun generate(files: List<ChangedFile>, stat: String, conventional: Boolean): String {
+    fun generate(
+        files: List<ChangedFile>,
+        stat: String,
+        conventional: Boolean,
+        responseLanguage: String = "en",
+        customInstructions: String = ""
+    ): String {
+        val preferences = resolvePreferences(conventional, responseLanguage, customInstructions)
+
         if (files.isEmpty()) {
-            return if (conventional) "chore: no staged changes" else "No staged changes"
+            return when {
+                preferences.supportConventional && preferences.chinese -> "chore: 没有已暂存改动"
+                preferences.supportConventional -> "chore: no staged changes"
+                preferences.chinese -> "没有已暂存改动"
+                else -> "No staged changes"
+            }
         }
 
-        val subject = summarize(files)
-        val body = buildBody(files, stat)
+        val subject = summarize(files, preferences.chinese)
+        val body = if (preferences.includeBody) buildBody(files, stat, preferences.chinese) else ""
 
-        return if (conventional) {
+        return if (preferences.supportConventional) {
             val type = inferType(files)
-            val scope = inferScope(files)
+            val scope = if (preferences.includeScope) inferScope(files) else null
             val header = if (scope != null) "$type($scope): $subject" else "$type: $subject"
             if (body.isBlank()) header else "$header\n\n$body"
         } else {
-            val header = subject.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            val header = if (preferences.chinese) {
+                subject
+            } else {
+                subject.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            }
             if (body.isBlank()) header else "$header\n\n$body"
         }
     }
+
+    private data class Preferences(
+        val supportConventional: Boolean,
+        val chinese: Boolean,
+        val includeBody: Boolean,
+        val includeScope: Boolean
+    )
+
+    /**
+     * Best-effort interpretation of free-form custom instructions for the offline fallback.
+     * The AI path sends the raw rules to DeepSeek; here we only honour explicit language,
+     * Conventional-prefix, scope and body intent so the fallback stays reasonably aligned.
+     */
+    private fun resolvePreferences(
+        conventional: Boolean,
+        responseLanguage: String,
+        customInstructions: String
+    ): Preferences {
+        val text = customInstructions.lowercase()
+
+        val chinese = when {
+            containsAny(text, "简体中文", "中文", "汉语", "chinese") -> true
+            containsAny(text, "english", "英文", "英语") -> false
+            else -> !responseLanguage.equals("en", ignoreCase = true)
+        }
+
+        val supportConventional = when {
+            containsAny(
+                text,
+                "不使用 conventional",
+                "不要 conventional",
+                "不加前缀",
+                "不要前缀",
+                "without prefix",
+                "no prefix",
+                "non-conventional",
+                "plain message"
+            ) -> false
+
+            containsAny(text, "使用 conventional", "use conventional", "must use conventional", "必须 conventional") -> true
+            else -> conventional
+        }
+
+        val includeBody = !containsAny(
+            text,
+            "不要 body",
+            "不要正文",
+            "no body",
+            "without body",
+            "only a subject",
+            "subject only",
+            "仅首行",
+            "只要标题"
+        )
+
+        val includeScope = !containsAny(text, "不要 scope", "不要scope", "no scope", "without scope")
+
+        return Preferences(supportConventional, chinese, includeBody, includeScope)
+    }
+
+    private fun containsAny(text: String, vararg needles: String): Boolean =
+        needles.any { text.contains(it) }
 
     internal fun inferType(files: List<ChangedFile>): String {
         val paths = files.map { normalize(it.path) }
@@ -60,12 +139,12 @@ object HeuristicCommitMessageGenerator {
         return common.lastOrNull()?.takeIf { it.length <= 24 }
     }
 
-    internal fun summarize(files: List<ChangedFile>): String {
+    internal fun summarize(files: List<ChangedFile>, chinese: Boolean = false): String {
         val verb = when {
-            files.all { it.kind == ChangeKind.ADDED } -> "add"
-            files.all { it.kind == ChangeKind.DELETED } -> "remove"
-            files.any { it.kind == ChangeKind.ADDED } -> "add"
-            else -> "update"
+            files.all { it.kind == ChangeKind.ADDED } -> if (chinese) "新增" else "add"
+            files.all { it.kind == ChangeKind.DELETED } -> if (chinese) "删除" else "remove"
+            files.any { it.kind == ChangeKind.ADDED } -> if (chinese) "新增" else "add"
+            else -> if (chinese) "更新" else "update"
         }
 
         val subject = if (files.size == 1) {
@@ -73,7 +152,11 @@ object HeuristicCommitMessageGenerator {
         } else {
             val names = files.take(3).joinToString(", ") { fileName(it.path) }
             val more = if (files.size > 3) ", ..." else ""
-            "$verb ${files.size} files: $names$more"
+            if (chinese) {
+                "$verb ${files.size} 个文件: $names$more"
+            } else {
+                "$verb ${files.size} files: $names$more"
+            }
         }
         return truncate(subject, 72)
     }
@@ -84,16 +167,20 @@ object HeuristicCommitMessageGenerator {
         return value.take(keep) + "..."
     }
 
-    private fun buildBody(files: List<ChangedFile>, stat: String): String {
+    private fun buildBody(files: List<ChangedFile>, stat: String, chinese: Boolean): String {
         val lines = mutableListOf<String>()
-        lines += "Changed files:"
+        lines += if (chinese) "变更文件:" else "Changed files:"
 
         val grouped = files.groupBy { it.status.firstOrNull()?.uppercaseChar() ?: '?' }
         for ((status, group) in grouped) {
-            lines += "- ${statusLabel(status)} (${group.size}):"
+            lines += if (chinese) {
+                "- ${statusLabel(status, true)} (${group.size} 个):"
+            } else {
+                "- ${statusLabel(status, false)} (${group.size}):"
+            }
             group.take(20).forEach { lines += "  - ${it.path}" }
             if (group.size > 20) {
-                lines += "  - ... and ${group.size - 20} more"
+                lines += if (chinese) "  - ... 以及另外 ${group.size - 20} 个" else "  - ... and ${group.size - 20} more"
             }
         }
 
@@ -105,13 +192,13 @@ object HeuristicCommitMessageGenerator {
         return lines.joinToString("\n")
     }
 
-    private fun statusLabel(status: Char): String = when (status) {
-        'A' -> "Added"
-        'M' -> "Modified"
-        'D' -> "Deleted"
-        'R' -> "Renamed"
-        'C' -> "Copied"
-        else -> "Other"
+    private fun statusLabel(status: Char, chinese: Boolean): String = when (status) {
+        'A' -> if (chinese) "新增" else "Added"
+        'M' -> if (chinese) "修改" else "Modified"
+        'D' -> if (chinese) "删除" else "Deleted"
+        'R' -> if (chinese) "重命名" else "Renamed"
+        'C' -> if (chinese) "复制" else "Copied"
+        else -> if (chinese) "其他" else "Other"
     }
 
     private fun fileName(path: String): String =

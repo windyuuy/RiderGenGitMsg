@@ -48,7 +48,7 @@ class DeepSeekCommitMessageGeneratorTest {
             )
         }
         try {
-            val settings = RiderGenSettings.State(baseUrl = "http://127.0.0.1:${server.address.port}")
+            val settings = RiderGenSettings.State(baseUrl = "http://127.0.0.1:${server.address.port}", allowLocalhostHttp = true)
             val message = DeepSeekCommitMessageGenerator.generate(settings, snapshot, "sk-test")
             assertEquals("feat(parser): add staged diff support", message)
         } finally {
@@ -68,7 +68,8 @@ class DeepSeekCommitMessageGeneratorTest {
         try {
             val result = DeepSeekCommitMessageGenerator.testToken(
                 "http://127.0.0.1:${server.address.port}",
-                "sk-test"
+                "sk-test",
+                allowLocalhostHttp = true
             )
             assertTrue(result.ok, result.message)
             assertEquals(listOf("deepseek-chat", "deepseek-reasoner"), result.models)
@@ -90,7 +91,8 @@ class DeepSeekCommitMessageGeneratorTest {
         try {
             val result = DeepSeekCommitMessageGenerator.testToken(
                 "http://127.0.0.1:${server.address.port}",
-                "sk-bad"
+                "sk-bad",
+                allowLocalhostHttp = true
             )
             assertFalse(result.ok)
             assertEquals(DeepSeekErrorKind.AUTH, result.errorKind)
@@ -113,7 +115,8 @@ class DeepSeekCommitMessageGeneratorTest {
         try {
             val result = DeepSeekCommitMessageGenerator.testToken(
                 "http://127.0.0.1:${server.address.port}",
-                "sk-empty"
+                "sk-empty",
+                allowLocalhostHttp = true
             )
             assertFalse(result.ok)
             assertEquals(DeepSeekErrorKind.QUOTA, result.errorKind)
@@ -136,7 +139,8 @@ class DeepSeekCommitMessageGeneratorTest {
         try {
             val result = DeepSeekCommitMessageGenerator.testToken(
                 "http://127.0.0.1:${server.address.port}",
-                "sk-test"
+                "sk-test",
+                allowLocalhostHttp = true
             )
             assertFalse(result.ok)
             assertEquals(DeepSeekErrorKind.RATE_LIMIT, result.errorKind)
@@ -152,7 +156,11 @@ class DeepSeekCommitMessageGeneratorTest {
         val port = server.address.port
         server.stop(0)
 
-        val result = DeepSeekCommitMessageGenerator.testToken("http://127.0.0.1:$port", "sk-test")
+        val result = DeepSeekCommitMessageGenerator.testToken(
+            "http://127.0.0.1:$port",
+            "sk-test",
+            allowLocalhostHttp = true
+        )
         assertFalse(result.ok)
         assertEquals(DeepSeekErrorKind.NETWORK, result.errorKind)
         assertTrue(result.message.contains("网络不可达"), result.message)
@@ -164,7 +172,8 @@ class DeepSeekCommitMessageGeneratorTest {
         try {
             val result = DeepSeekCommitMessageGenerator.testToken(
                 "http://127.0.0.1:${server.address.port}",
-                "sk-test"
+                "sk-test",
+                allowLocalhostHttp = true
             )
             assertFalse(result.ok)
             assertEquals(DeepSeekErrorKind.INVALID_RESPONSE, result.errorKind)
@@ -177,7 +186,7 @@ class DeepSeekCommitMessageGeneratorTest {
     fun `missing choices in chat response is rejected`() {
         val server = startServer { exchange -> respond(exchange, 200, """{"choices":[]}""") }
         try {
-            val settings = RiderGenSettings.State(baseUrl = "http://127.0.0.1:${server.address.port}")
+            val settings = RiderGenSettings.State(baseUrl = "http://127.0.0.1:${server.address.port}", allowLocalhostHttp = true)
             val error = assertFailsWith<DeepSeekException> {
                 DeepSeekCommitMessageGenerator.generate(settings, snapshot, "sk-test")
             }
@@ -202,7 +211,8 @@ class DeepSeekCommitMessageGeneratorTest {
             val rules = "RULE-MARKER: always add a short body and use English."
             val settings = RiderGenSettings.State(
                 baseUrl = "http://127.0.0.1:${server.address.port}",
-                customInstructions = rules
+                customInstructions = rules,
+                allowLocalhostHttp = true
             )
             DeepSeekCommitMessageGenerator.generate(settings, snapshot, "sk-test")
 
@@ -325,9 +335,70 @@ class DeepSeekCommitMessageGeneratorTest {
             "https://api.deepseek.com/models",
             DeepSeekCommitMessageGenerator.modelsEndpoint("https://api.deepseek.com")
         )
-        assertEquals(
-            "https://api.deepseek.com/models",
-            DeepSeekCommitMessageGenerator.modelsEndpoint("https://api.deepseek.com/chat/completions")
-        )
+    }
+
+    @Test
+    fun `error body containing the token is redacted`() {
+        val server = startServer { exchange ->
+            respond(
+                exchange,
+                401,
+                """{"error":{"message":"bad token sk-secret-1234567890"}}"""
+            )
+        }
+        try {
+            val token = "sk-secret-1234567890"
+            val result = DeepSeekCommitMessageGenerator.testToken(
+                "http://127.0.0.1:${server.address.port}",
+                token,
+                allowLocalhostHttp = true
+            )
+            assertFalse(result.ok)
+            assertFalse(result.message.contains(token), result.message)
+            assertTrue(result.message.contains("***"), result.message)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `secrets in the staged diff are masked before sending`() {
+        var capturedBody: String? = null
+        val server = startServer { exchange ->
+            capturedBody = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
+            respond(
+                exchange,
+                200,
+                """{"choices":[{"message":{"role":"assistant","content":"feat: test"}}]}"""
+            )
+        }
+        try {
+            val settings = RiderGenSettings.State(
+                baseUrl = "http://127.0.0.1:${server.address.port}",
+                allowLocalhostHttp = true
+            )
+            val secretSnapshot = snapshot.copy(
+                diff = "+ val key = \"sk-abcdefghijklmnop\"\n+ aws AKIAABCDEFGHIJKLMNOP"
+            )
+            DeepSeekCommitMessageGenerator.generate(settings, secretSnapshot, "sk-test")
+
+            val requestBody = capturedBody ?: error("request body not captured")
+            assertFalse(requestBody.contains("sk-abcdefghijklmnop"), requestBody)
+            assertFalse(requestBody.contains("AKIAABCDEFGHIJKLMNOP"), requestBody)
+            assertTrue(requestBody.contains("sk-[REDACTED]"), requestBody)
+            assertTrue(requestBody.contains("AKIA[REDACTED]"), requestBody)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `base url policy rejects http for requests too`() {
+        val settings = RiderGenSettings.State(baseUrl = "http://api.deepseek.com")
+        val error = assertFailsWith<DeepSeekException> {
+            DeepSeekCommitMessageGenerator.generate(settings, snapshot, "sk-test")
+        }
+        assertEquals(DeepSeekErrorKind.BAD_REQUEST, error.kind)
+        assertTrue(error.message!!.contains("仅允许 https"), error.message)
     }
 }

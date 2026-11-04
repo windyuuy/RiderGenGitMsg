@@ -5,3 +5,12 @@ build/
 .kotlin/
 *.iml
 local.properties
+
+# Secrets and local environment files — never commit these
+.env*
+*.log
+hs_err_pid*
+*.hprof
+*.pem
+*.key
+*.p12

@@ -31,7 +31,17 @@ class RiderGenSettings : PersistentStateComponent<RiderGenSettings.State> {
          * Extra user instructions appended to the system prompt as the highest-priority rules.
          * Empty means the built-in default behaviour is unchanged.
          */
-        var customInstructions: String = ""
+        var customInstructions: String = "",
+        /**
+         * Explicit confirmation that a custom (non-official) base URL receives the token.
+         * Only meaningful when [baseUrl] does not point to `api.deepseek.com`.
+         */
+        var customBaseUrlConfirmed: Boolean = false,
+        /**
+         * Debug switch: allow `http://localhost` base URLs (local proxies and tests).
+         * Always false unless the user enables it under an advanced option.
+         */
+        var allowLocalhostHttp: Boolean = false
     ) {
         /** Effective language: new field first, then the legacy `zh`/`en` value, then US English. */
         fun resolvedLanguage(): CommitLanguage =

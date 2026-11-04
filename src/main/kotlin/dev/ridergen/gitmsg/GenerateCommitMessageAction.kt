@@ -64,7 +64,8 @@ class GenerateCommitMessageAction : AnAction(
             private var generated: String? = null
             private var problem: String? = null
             private var usedLocalFallback = false
-            private var usedLegacyToken = false
+            private var redactedCount = 0
+            private var migration: TokenStorageService.MigrationResult? = null
 
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
@@ -81,35 +82,45 @@ class GenerateCommitMessageAction : AnAction(
                     return
                 }
 
-                val token = try {
-                    DeepSeekTokenStore.effectiveToken(settings)
-                } catch (t: Throwable) {
-                    null
-                }
-                usedLegacyToken = try {
-                    DeepSeekTokenStore.hasLegacyToken(settings)
-                } catch (t: Throwable) {
-                    false
-                }
+                // Default: mask high-confidence secrets before the diff is sent to the model.
+                val scan = SensitiveContentScanner.scan(snapshot.diff)
+                redactedCount = scan.total
+                val outgoing = if (scan.hasFindings) snapshot.copy(diff = scan.text) else snapshot
 
-                if (token.isNullOrBlank()) {
-                    usedLocalFallback = true
-                    generated = HeuristicCommitMessageGenerator.generate(
-                        snapshot.files,
-                        snapshot.stat,
-                        settings.conventionalCommits,
-                        settings.resolvedLanguage(),
-                        settings.customInstructions
-                    )
+                val read = try {
+                    TokenStorage.service().readToken()
+                } catch (t: Throwable) {
+                    problem = "读取凭据失败：${SecurityRedaction.redact(t.message ?: t.javaClass.simpleName)}"
                     return
                 }
+                migration = read.migration
 
-                indicator.text = "调用 DeepSeek（${settings.model}）…"
-                generated = try {
-                    DeepSeekCommitMessageGenerator.generate(settings, snapshot, token)
-                } catch (t: Throwable) {
-                    problem = t.message ?: t.javaClass.simpleName
-                    null
+                try {
+                    val token = read.token?.let { String(it).trim() }
+                    if (token.isNullOrBlank()) {
+                        usedLocalFallback = true
+                        generated = HeuristicCommitMessageGenerator.generate(
+                            snapshot.files,
+                            snapshot.stat,
+                            settings.conventionalCommits,
+                            settings.resolvedLanguage(),
+                            settings.customInstructions
+                        )
+                        return
+                    }
+
+                    indicator.text = "调用 DeepSeek（${settings.model}）…"
+                    generated = try {
+                        DeepSeekCommitMessageGenerator.generate(settings, outgoing, token)
+                    } catch (t: Throwable) {
+                        problem = SecurityRedaction.redact(
+                            t.message ?: t.javaClass.simpleName,
+                            token
+                        )
+                        null
+                    }
+                } finally {
+                    read.close()
                 }
             }
 
@@ -117,7 +128,11 @@ class GenerateCommitMessageAction : AnAction(
                 if (project.isDisposed) return
                 val message = generated
                 if (message == null) {
-                    notify(project, problem ?: "生成提交信息失败", NotificationType.ERROR)
+                    notify(
+                        project,
+                        SecurityRedaction.redact(problem ?: "生成提交信息失败"),
+                        NotificationType.ERROR
+                    )
                     return
                 }
 
@@ -128,35 +143,42 @@ class GenerateCommitMessageAction : AnAction(
                 }
                 insertMessage(project, commitMessage, document, finalText)
 
-                when {
-                    usedLocalFallback -> {
-                        val language = settings.resolvedLanguage()
-                        val fallbackNote = if (HeuristicCommitMessageGenerator.usesEnglishFallback(language)) {
-                            "\n当前所选语言「${language.englishName}」暂无本地模板，已使用英文模板生成；" +
-                                "配置 Token 后可获得该语言结果。"
-                        } else {
-                            ""
-                        }
-                        notify(
-                            project,
-                            "未配置 DeepSeek API Token，已用本地模板生成。请在 Settings > Tools > AIGenCommitMsg (DeepSeek) 配置 Token。$fallbackNote",
-                            NotificationType.WARNING
-                        )
+                if (usedLocalFallback) {
+                    val language = settings.resolvedLanguage()
+                    val fallbackNote = if (HeuristicCommitMessageGenerator.usesEnglishFallback(language)) {
+                        "\n当前所选语言「${language.englishName}」暂无本地模板，已使用英文模板生成；" +
+                            "配置 Token 后可获得该语言结果。"
+                    } else {
+                        ""
                     }
-
-                    usedLegacyToken -> notify(
+                    notify(
                         project,
-                        "已使用旧版明文 Token 生成。请打开设置页点击 Apply，把 Token 迁移到 IDE PasswordSafe。",
+                        "未配置 DeepSeek API Token，已用本地模板生成。请在 Settings > Tools > AIGenCommitMsg (DeepSeek) 配置 Token。$fallbackNote",
                         NotificationType.WARNING
                     )
-
-                    else -> notify(project, "DeepSeek 已生成提交信息。", NotificationType.INFORMATION)
+                    return
                 }
+
+                val notes = buildList {
+                    if (redactedCount > 0) {
+                        add("已在发送前打码 $redactedCount 处疑似密钥")
+                    }
+                    migration?.let { add(it.message) }
+                }
+                val suffix = if (notes.isEmpty()) "" else "\n" + notes.joinToString("；")
+                val type = if (migration?.success == false) NotificationType.WARNING else NotificationType.INFORMATION
+                notify(project, SecurityRedaction.redact("DeepSeek 已生成提交信息。$suffix"), type)
             }
 
             override fun onThrowable(error: Throwable) {
                 if (project.isDisposed) return
-                notify(project, "生成提交信息失败：${error.message ?: error.javaClass.simpleName}", NotificationType.ERROR)
+                notify(
+                    project,
+                    SecurityRedaction.redact(
+                        "生成提交信息失败：${error.message ?: error.javaClass.simpleName}"
+                    ),
+                    NotificationType.ERROR
+                )
             }
 
             override fun onFinished() {
@@ -212,7 +234,7 @@ class GenerateCommitMessageAction : AnAction(
     private fun notify(project: Project, content: String, type: NotificationType) =
         NotificationGroupManager.getInstance()
             .getNotificationGroup("AICommitMessageGenerator")
-            .createNotification(content, type)
+            .createNotification(SecurityRedaction.redact(content), type)
             .also { it.notify(project) }
 
     private enum class ExistingContentAction {

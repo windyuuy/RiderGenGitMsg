@@ -39,8 +39,24 @@ object DeepSeekCommitMessageGenerator {
             throw DeepSeekException(DeepSeekErrorKind.AUTH, "未配置 DeepSeek API Token")
         }
         val baseUrl = settings.baseUrl.trim().ifBlank { RiderGenSettings.DEFAULT_BASE_URL }
+        val safeBaseUrl = SecurityRedaction.sanitizeUrl(baseUrl)
+        when (val policy = DeepSeekUrlPolicy.validate(
+            baseUrl,
+            settings.customBaseUrlConfirmed,
+            settings.allowLocalhostHttp
+        )) {
+            is DeepSeekUrlPolicy.Result.Rejected ->
+                throw DeepSeekException(
+                    DeepSeekErrorKind.BAD_REQUEST,
+                    "Base URL 不合法：${policy.reason}"
+                )
+
+            DeepSeekUrlPolicy.Result.Allowed -> Unit
+        }
         val model = settings.model.trim().ifBlank { RiderGenSettings.DEFAULT_MODEL }
-        val diff = snapshot.diff.take(settings.maxDiffChars.coerceAtLeast(2000))
+        // Redact high-confidence secrets before the diff leaves the machine.
+        val diff = SensitiveContentScanner.redact(snapshot.diff)
+            .take(settings.maxDiffChars.coerceAtLeast(2000))
 
         val request = try {
             HttpRequest.newBuilder(URI.create(endpoint(baseUrl)))
@@ -51,13 +67,16 @@ object DeepSeekCommitMessageGenerator {
                 .POST(HttpRequest.BodyPublishers.ofString(buildRequestBody(settings, snapshot, diff, model), StandardCharsets.UTF_8))
                 .build()
         } catch (e: IllegalArgumentException) {
-            throw DeepSeekException(DeepSeekErrorKind.BAD_REQUEST, "Base URL 不合法：$baseUrl")
+            throw DeepSeekException(DeepSeekErrorKind.BAD_REQUEST, "Base URL 不合法：$safeBaseUrl")
         }
 
         val response = send(request)
         val status = response.statusCode()
         if (status !in 200..299) {
-            throw DeepSeekException(kindFor(status), describeHttpFailure(status, response.body()))
+            throw DeepSeekException(
+                kindFor(status),
+                describeHttpFailure(status, response.body(), token)
+            )
         }
 
         val body = response.body()
@@ -73,11 +92,11 @@ object DeepSeekCommitMessageGenerator {
         } catch (e: RuntimeException) {
             throw DeepSeekException(
                 DeepSeekErrorKind.INVALID_RESPONSE,
-                "DeepSeek 返回体不是合法 JSON：${body.take(200)}"
+                "DeepSeek 返回体不是合法 JSON：${SecurityRedaction.redact(body.take(200), token)}"
             )
         } ?: throw DeepSeekException(
             DeepSeekErrorKind.INVALID_RESPONSE,
-            "DeepSeek 返回体缺少 choices[0].message.content：${body.take(200)}"
+            "DeepSeek 返回体缺少 choices[0].message.content：${SecurityRedaction.redact(body.take(200), token)}"
         )
 
         return sanitize(content)
@@ -87,7 +106,12 @@ object DeepSeekCommitMessageGenerator {
      * Lightweight token probe against GET {baseUrl}/models using the token currently typed
      * in the settings form (no save required).
      */
-    fun testToken(baseUrl: String, token: String): TokenTestResult {
+    fun testToken(
+        baseUrl: String,
+        token: String,
+        allowLocalhostHttp: Boolean = false,
+        customBaseUrlConfirmed: Boolean = false
+    ): TokenTestResult {
         if (token.isBlank()) {
             return TokenTestResult(
                 ok = false,
@@ -97,6 +121,22 @@ object DeepSeekCommitMessageGenerator {
         }
 
         val normalized = baseUrl.trim().ifBlank { RiderGenSettings.DEFAULT_BASE_URL }
+        val safeBaseUrl = SecurityRedaction.sanitizeUrl(normalized)
+        when (val policy = DeepSeekUrlPolicy.validate(
+            normalized,
+            customBaseUrlConfirmed,
+            allowLocalhostHttp
+        )) {
+            is DeepSeekUrlPolicy.Result.Rejected -> {
+                return TokenTestResult(
+                    false,
+                    DeepSeekErrorKind.BAD_REQUEST,
+                    "Base URL 不合法：${policy.reason}"
+                )
+            }
+
+            DeepSeekUrlPolicy.Result.Allowed -> Unit
+        }
         val request = try {
             HttpRequest.newBuilder(URI.create(modelsEndpoint(normalized)))
                 .timeout(Duration.ofSeconds(PROBE_TIMEOUT_SECONDS))
@@ -105,7 +145,11 @@ object DeepSeekCommitMessageGenerator {
                 .GET()
                 .build()
         } catch (e: IllegalArgumentException) {
-            return TokenTestResult(false, DeepSeekErrorKind.BAD_REQUEST, "Base URL 不合法：$normalized")
+            return TokenTestResult(
+                false,
+                DeepSeekErrorKind.BAD_REQUEST,
+                "Base URL 不合法：$safeBaseUrl"
+            )
         }
 
         val response = try {
@@ -114,32 +158,36 @@ object DeepSeekCommitMessageGenerator {
             return TokenTestResult(
                 false,
                 DeepSeekErrorKind.TIMEOUT,
-                "请求超时（${PROBE_TIMEOUT_SECONDS} 秒）：无法访问 $normalized/models，请检查网络或代理"
+                "请求超时（${PROBE_TIMEOUT_SECONDS} 秒）：无法访问 $safeBaseUrl/models，请检查网络或代理"
             )
         } catch (e: ConnectException) {
             return TokenTestResult(
                 false,
                 DeepSeekErrorKind.NETWORK,
-                "网络不可达：无法连接 $normalized（${e.message ?: "连接被拒绝"}）"
+                "网络不可达：无法连接 $safeBaseUrl（${e.message ?: "连接被拒绝"}）"
             )
         } catch (e: UnknownHostException) {
             return TokenTestResult(
                 false,
                 DeepSeekErrorKind.NETWORK,
-                "网络不可达：无法解析主机 $normalized，请检查 DNS 或网络"
+                "网络不可达：无法解析主机 $safeBaseUrl，请检查 DNS 或网络"
             )
         } catch (e: IOException) {
             return TokenTestResult(
                 false,
                 DeepSeekErrorKind.NETWORK,
-                "网络请求失败：${e.message ?: e.javaClass.simpleName}"
+                "网络请求失败：${SecurityRedaction.redact(e.message ?: e.javaClass.simpleName, token)}"
             )
         }
 
         val status = response.statusCode()
         val body = response.body()
         if (status !in 200..299) {
-            return TokenTestResult(false, kindFor(status), describeHttpFailure(status, body))
+            return TokenTestResult(
+                false,
+                kindFor(status),
+                describeHttpFailure(status, body, token)
+            )
         }
 
         val payload = try {
@@ -148,7 +196,7 @@ object DeepSeekCommitMessageGenerator {
             return TokenTestResult(
                 false,
                 DeepSeekErrorKind.INVALID_RESPONSE,
-                "HTTP 200，但返回体不是合法 JSON：${body.take(200)}"
+                "HTTP 200，但返回体不是合法 JSON：${SecurityRedaction.redact(body.take(200), token)}"
             )
         }
 
@@ -186,8 +234,11 @@ object DeepSeekCommitMessageGenerator {
         return trimmed
     }
 
-    internal fun describeHttpFailure(status: Int, body: String): String {
-        val summary = apiErrorMessage(body) ?: body.trim().take(300)
+    internal fun describeHttpFailure(status: Int, body: String, knownToken: String? = null): String {
+        val summary = SecurityRedaction.redact(
+            apiErrorMessage(body) ?: body.trim().take(300),
+            knownToken
+        )
         val reason = when (status) {
             401, 403 -> "Token 无效或无权限（HTTP $status），请检查 DeepSeek API Token"
             402 -> "账户余额不足（HTTP 402），请为 DeepSeek 账户充值"

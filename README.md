@@ -6,8 +6,9 @@ JetBrains Rider 插件：根据 **已暂存改动**（`git diff --cached`）调�
 - 插件 ID：`dev.gitmsg.ai.commithelper`
 - 固定使用 DeepSeek 的 OpenAI 兼容接口：默认 Base URL `https://api.deepseek.com`，默认 Model `deepseek-chat`。
 - 按钮位于提交信息工具栏中「历史提交信息」时钟按钮的右侧。
-- Token 保存在 IDE **PasswordSafe / CredentialStore** 中，不写入项目文件，也不写入 `ridergen-gitmsg.xml`。
-- 设置页内置「测试连接」按钮，可在保存前验证 Token，并区分 401/403、402、429、超时、网络不可达等错误。
+- Token 优先保存在系统钥匙串（Windows 凭据管理器 / macOS 钥匙串 / Linux Secret Service），不可用时回退 IDE **PasswordSafe**；不写入项目文件，也不写入 `ridergen-gitmsg.xml`。
+- 设置页不再回填明文 Token：只显示「已保存 ●●●●」，可短暂查看前 4 位与后 4 位，并提供「清除 Token」与「迁移到系统钥匙串」。
+- 设置页内置「测试连接」按钮，可验证输入框中的新 Token，未输入时自动读取已保存的 Token，并区分 401/403、402、429、超时、网络不可达等错误。
 - 未配置 Token 时，回退到本地模板生成，保证开箱可用。
 
 ## 版本与环境
@@ -22,7 +23,7 @@ JetBrains Rider 插件：根据 **已暂存改动**（`git diff --cached`）调�
 | Kotlin | 2.4.0 |
 | IntelliJ Platform Gradle Plugin | 2.19.0 |
 | 插件兼容范围 | `since-build=262`（按平台建议不设置 `until-build`，向前兼容） |
-| 插件版本 | 0.6.0 |
+| 插件版本 | 0.7.0 |
 
 > 安装目录名可能仍是 `JetBrains Rider 2025.2.3`，但其中的 `product-info.json` 实际报告 `2026.2.3.1`（build 262）。本地平台路径在 [gradle.properties](gradle.properties) 的 `platformLocalPath` 中配置；在其他机器构建时改成对应的 Rider 2026.2 安装目录，或执行：
 >
@@ -42,7 +43,7 @@ $env:JAVA_HOME = "D:/Procs/IDESS/JetBrains/JetBrains Rider 2025.2.3/jbr"
 产物：
 
 ```
-build/distributions/AIGenCommitMsg-0.6.0.zip
+build/distributions/AIGenCommitMsg-0.7.0.zip
 ```
 
 ### 平台选择（本地 / CI）
@@ -60,13 +61,13 @@ CI 选择 IntelliJ IDEA 的原因：Rider 平台 artifact 在 `intellij-reposito
 
 ## 发布流程
 
-1. 修改 [build.gradle.kts](build.gradle.kts) 中的 `version`（当前 `0.6.0`）；zip 前缀由 [settings.gradle.kts](settings.gradle.kts) 的 `rootProject.name = AIGenCommitMsg` 决定，两者不要改名。
+1. 修改 [build.gradle.kts](build.gradle.kts) 中的 `version`（当前 `0.7.0`）；zip 前缀由 [settings.gradle.kts](settings.gradle.kts) 的 `rootProject.name = AIGenCommitMsg` 决定，两者不要改名。
 2. 提交并推送主分支：`git push origin main`。
 3. 打 tag（必须带 `v` 前缀，数字与 `version` 完全一致）：
 
    ```powershell
-   git tag v0.6.0
-   git push origin v0.6.0
+   git tag v0.7.0
+   git push origin v0.7.0
    ```
 
 4. GitHub Actions 的 `Release` 工作流会被 `push: tags v*` 或 `release: published` 触发（也支持 `workflow_dispatch` 手动补发）：
@@ -90,7 +91,7 @@ CI 与本地只在 IntelliJ Platform SDK 来源上不同（CI 用 `intellij-idea
 
 1. Rider：`Settings > Plugins`。
 2. 齿轮菜单 → `Install Plugin from Disk...`。
-3. 选择 `build/distributions/AIGenCommitMsg-0.6.0.zip`。
+3. 选择 `build/distributions/AIGenCommitMsg-0.7.0.zip`。
 4. 重启 IDE。
 
 ## Marketplace 上传注意事项
@@ -134,7 +135,8 @@ AIGenCommitMsg adds a button to the commit message toolbar, right next to the me
 Highlights:
 - One-click generation from staged changes (git diff --cached), with overwrite/append/cancel handling for a non-empty message field.
 - DeepSeek-only integration with a configurable base URL (default https://api.deepseek.com) and model (default deepseek-chat).
-- API token stored in the IDE PasswordSafe, never in project files.
+- API token stored in the system keychain (Windows Credential Manager, macOS Keychain, Linux Secret Service) with IDE PasswordSafe fallback, never in project files.
+- Token hardening: settings never refill the plaintext token, a masked summary and a clear action are provided, secrets are redacted from messages, the base URL is https-only, and staged diffs are scanned for secrets before sending.
 - Built-in Test Connection button with clear errors for invalid token, insufficient balance, rate limiting, timeouts and network failures.
 - Searchable commit-message language picker with 213 languages and region variants, matched by country code, English name or native name.
 - Custom generation rules appended to the system prompt with the highest priority.
@@ -158,14 +160,15 @@ Supported IDE: 2026.2 and later (build 262+).
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| Base URL | `https://api.deepseek.com` | 可填写根地址，插件自动拼接 `/chat/completions` 或 `/models`；也可直接填完整 endpoint |
+| Base URL | `https://api.deepseek.com` | 可填写根地址，插件自动拼接 `/chat/completions` 或 `/models`；也可直接填完整 endpoint。**仅允许 https**，拒绝 userinfo 与非 443 端口；自定义域名需勾选确认「Token 会发送到该地址」，并且每次请求前都会重新校验 |
 | Model | `deepseek-chat` | DeepSeek 模型名，例如 `deepseek-chat` / `deepseek-reasoner` |
-| DeepSeek API Token | 空 | 密码式输入框。保存后写入 IDE PasswordSafe，不写入 XML |
+| DeepSeek API Token | 空 | 密码式输入框，**不会回填明文**。保存后写入系统钥匙串（不可用时回退 IDE PasswordSafe），不写入 XML |
 | Temperature | `0.2` | 0–2 |
 | 提交信息语言 | `US · English` | 可搜索下拉，内置 **213 条**语言 / 地区变体，覆盖 162 个国家/地区。详见下文「提交信息语言」 |
 | Use Conventional Commits | 开启 | `type(scope): subject` 格式 |
 | Max diff characters | `24000` | 发送给模型的 diff 最大字符数 |
 | 生成规则 / 额外提示词 | 空 | 多行可滚动文本框。作为 **system 提示**的一部分发送给 DeepSeek；留空保持原有默认行为，非空时优先级最高 |
+| 允许 http://localhost 调试 | 关闭 | 仅用于本机回环地址调试（单元测试 / 本地代理）。开启后允许 `http://localhost`、`http://127.0.0.1` 及任意端口，不适用于远程地址 |
 
 ### 生成规则 / 额外提示词
 
@@ -219,11 +222,13 @@ Never mention file names.
 
 ### 测试连接按钮
 
-Token 输入框右侧的「测试连接」按钮：
+Token 输入框下方的「测试连接」按钮：
 
-1. 使用**当前输入框里的 Token**（不需要先保存）请求 `GET {Base URL}/models`。
-2. 请求在后台线程执行，界面不会卡住；请求期间按钮禁用并显示「测试中…」。
-3. 结果显示在按钮下方的状态标签中：
+1. 若输入框中已有**新输入**的 Token，直接用它请求 `GET {Base URL}/models`（不需要先保存）。
+2. 若输入框为空，或当前只显示脱敏摘要，则**按需从存储读取**已保存的 Token；不会把明文长期放回 UI。
+3. 请求前先执行 Base URL 策略校验（与保存时、每次生成请求前相同）。
+4. 请求在后台线程执行，界面不会卡住；请求期间按钮禁用并显示「测试中…」。
+5. 结果显示在按钮下方的状态标签中：
    - 成功：`Token 有效（HTTP 200），可用模型：deepseek-chat, deepseek-reasoner`
    - 401/403：`Token 无效或无权限（HTTP 401/403）…`
    - 402：`账户余额不足（HTTP 402）…`
@@ -232,12 +237,57 @@ Token 输入框右侧的「测试连接」按钮：
    - 网络不可达：`网络不可达：无法连接 …` / `无法解析主机 …`
    - 其他非 200：显示状态码与响应摘要
    - 200 但响应体不是合法 JSON：`HTTP 200，但返回体不是合法 JSON…`
+6. 状态标签与通知中的 Token、`Authorization` / `Bearer` 头、疑似密钥形态以及含 userinfo 的 URL 都会被脱敏。
 
-### Token 存储
+### Token 存储（0.7.0+）
 
-- 新版本 Token 写入 `PasswordSafe.instance`（IDE 凭据存储 / 系统钥匙串），service name 为 `RiderGenGitMsg`，key 为 `DeepSeek API Token`。
-- `ridergen-gitmsg.xml` 中只保留 Base URL、Model、温度、语言、Conventional Commits、最大 diff 长度、自定义生成规则等非敏感配置。
-- 从 0.1.x 升级时，若 PasswordSafe 中还没有 Token，会临时回退到旧 XML 里的明文 `apiKey` 并在设置页提示迁移；点击 **Apply** 后 Token 写入 PasswordSafe，同时清空 XML 中的明文值。
+存储链按优先级自动选择，任何失败都只降级，不抛 UI 异常：
+
+| 平台 | 主存储 | 说明 |
+| --- | --- | --- |
+| Windows | Windows 凭据管理器 | JNA 调用 `CredWriteW` / `CredReadW` / `CredDeleteW`；`CRED_TYPE_GENERIC`、`CRED_PERSIST_LOCAL_MACHINE`；target 固定 `AIGenCommitMsg/DeepSeekToken` |
+| macOS | 钥匙串（Keychain） | JNA 调用 `SecKeychainAddGenericPassword` / `FindGenericPassword` / `ItemFreeContent` / `ItemDelete`；service `AIGenCommitMsg`，account `AIGenCommitMsg/DeepSeekToken` |
+| Linux | Secret Service | 通过 `secret-tool` CLI 访问；secret 经 stdin 传入，超时 8 秒；无桌面会话或无 `secret-tool` 时不可用 |
+| 全部平台（回退） | IDE PasswordSafe | 保留原 service name `RiderGenGitMsg` 与 key `DeepSeek API Token`，兼容旧版本 |
+
+- 所有实现都**延迟初始化**、异常全捕获；headless / CI 环境不会加载桌面服务，也不会阻塞启动。
+- 设置页显示当前实际存储位置（如「Windows 凭据管理器」「IDE PasswordSafe」）、读取失败原因，以及迁移结果。
+- 「清除 Token」会清除链上所有可用存储以及 XML 中残留的旧明文。
+- 「迁移到系统钥匙串」：PasswordSafe 中的 Token → 写系统钥匙串 → 回读校验 → 删除 PasswordSafe 条目；失败则继续使用 PasswordSafe，并显示「迁移未完成」。
+- **自动迁移顺序**：首次读取 Token 时，若系统钥匙串无值而 PasswordSafe 或旧 XML 有值，执行「写新 → 回读比对 → 删旧 → 清 XML」；任一步失败保留旧值并告警，绝不会丢失 Token。
+- 设置页只显示「已保存 ●●●●」；「显示」按钮短暂展示前 4 位与后 4 位（5 秒后自动清空），不会回填完整明文。
+- 旧的 `apiKey` 明文迁移成功后，`ridergen-gitmsg.xml` 中的该字段会被清空；非敏感配置项语义不变。
+
+### 安全说明
+
+**存储边界**
+
+- 系统钥匙串 / PasswordSafe 的保护范围是**当前操作系统用户**：同一用户下的其他程序（包括其他 IDE、脚本）在权限足够时仍可读取。
+- Windows 凭据管理器使用 DPAPI（用户级，不是 per-app ACL）；其他普通用户不可读，管理员 / SYSTEM 可读。
+- 回退到 IDE PasswordSafe 时，Windows 下同样是用户级 DPAPI 保护；同进程内的任意插件都可以调用 PasswordSafe API 直接读取。
+- 插件启动后，Token 只以 `String` / `char[]` 形式短暂存在于内存中，`char[]` 用完会清零；但 JVM / 网络库内部可能产生无法擦除的临时副本，内存转储（`*.hprof`、`hs_err_pid*`）仍可能包含 Token。
+- 通知、错误信息、状态标签与日志只展示脱敏摘要，不展示含 userinfo 的 URL。
+
+**轮换 Token**
+
+1. 在 DeepSeek 控制台创建新 Token 并吊销旧 Token。
+2. 打开设置页，在 Token 输入框粘贴新 Token，点击 Apply。
+3. 系统钥匙串为主存储时，保存成功后会自动删除 PasswordSafe 中的旧副本。
+4. 如需强制回到系统钥匙串，点击「迁移到系统钥匙串」并确认结果显示成功。
+
+**泄露处置**
+
+1. 先在 DeepSeek 控制台**吊销**泄露的 Token（优先级最高）。
+2. 在设置页点击「清除 Token」，清除所有存储与 XML 残留。
+3. 检查是否把含密钥的文件、日志、崩溃转储（`hs_err_pid*`、`*.hprof`）或错误截图提交 / 分享出去。
+4. 若曾把密钥写进提交历史，按仓库流程改写历史或视为已泄露处理，不要只删除工作区文件。
+
+**不要暂存含密钥的文件**
+
+- `.gitignore` 已忽略 `.env*`、`*.log`、`hs_err_pid*`、`*.hprof`、`*.pem`、`*.key`、`*.p12`。
+- 插件在发送 diff 前会扫描 `sk-`、`ghp_`、`AKIA`、`-----BEGIN * PRIVATE KEY-----` 等形态，命中时**默认打码**并在通知中说明打码数量。
+- 该扫描是**启发式**的，只覆盖常见形态，不能替代人工检查；`git add` 前请自行确认暂存内容。
+- 不要为了测试把真实 Token 写进源码、测试数据或 CI 变量明文；CI 中使用 Secrets。
 
 ## 使用
 
@@ -300,8 +350,47 @@ Token 输入框右侧的「测试连接」按钮：
 - `GET /models` Token 检测成功与模型列表解析。
 - 401/403、402、429、网络不可达、200 非 JSON、缺少 `choices` 等错误分支。
 - endpoint / models endpoint 归一化。
+- Token 存储链：系统存储成功、系统不可用回退 PasswordSafe、两者都不可用、PasswordSafe → 系统迁移成功、迁移写入失败 / 回读不一致时不丢 Token、旧 XML 明文迁移成功与失败保护。
+- 脱敏：已知 Token 原文、`Authorization` / `Bearer`、`sk-` / `ghp_` / `AKIA` / PEM 私钥、URL userinfo、掩码前后 4 位。
+- Base URL 策略：默认官方地址、http 拒绝、userinfo 拒绝、非 443、自定义域名确认、localhost 调试开关、非法 URL。
+- 敏感内容扫描：常见密钥形态命中与默认打码、普通代码不误伤、字段名保留。
+- 含 Token 的错误响应体在通知 / 测试结果中不出现原文。
 
 > 构建验证未使用真实 DeepSeek Token；上述错误分支通过本地 HTTP Server 模拟验证。
+> 真实系统钥匙串（Windows 凭据管理器 / macOS 钥匙串 / Linux Secret Service）无法在单元测试中验证，测试通过 `TokenStore` 接口的假实现覆盖。
+
+## 三平台人工验证清单
+
+> 本机为 Windows，macOS / Linux 的真实钥匙串行为**未实测**，以下是发布前需要在对应平台逐条勾选的手工验证项。
+
+### Windows
+
+- [ ] 启动 Rider 2026.2，打开 `Settings > Tools > AIGenCommitMsg (DeepSeek)`，Token 状态显示「未保存」或「已保存 ●●●●（Windows 凭据管理器）」。
+- [ ] 输入真实 Token → Apply → 状态变为「已保存 ●●●●（Windows 凭据管理器）」。
+- [ ] 打开 `控制面板 > 凭据管理器 > Windows 凭据`，能看到 target 为 `AIGenCommitMsg/DeepSeekToken` 的普通凭据。
+- [ ] 关闭并重开设置页，输入框为空，不出现明文 Token。
+- [ ] 点击「显示」，只显示前 4 位与后 4 位，约 5 秒后自动清空。
+- [ ] 点击「测试连接」，使用已保存 Token 请求成功。
+- [ ] 点击「清除 Token」→ 凭据管理器中的条目消失，设置页显示「未保存」。
+- [ ] 从旧版本（0.6.0）升级：若旧 XML 中有明文 `apiKey`，首次生成后 XML 中该值被清空，Token 出现在系统钥匙串。
+- [ ] 若 PasswordSafe 中已有旧 Token，点击「迁移到系统钥匙串」，提示成功且 PasswordSafe 条目被删除。
+
+### macOS
+
+- [ ] 设置页显示「已保存 ●●●●（macOS 钥匙串）」。
+- [ ] 打开「钥匙串访问」，搜索 service `AIGenCommitMsg`、account `AIGenCommitMsg/DeepSeekToken`，能看到条目。
+- [ ] 输入新 Token 并 Apply 后，钥匙串条目更新；点击「显示」只显示前后各 4 位。
+- [ ] 点击「测试连接」成功；点击「清除 Token」后钥匙串条目消失。
+- [ ] 从旧版本升级（PasswordSafe 在 macOS 上由系统钥匙串支撑）：不出现重复条目或数据丢失。
+- [ ] 在无网络时测试连接，提示网络不可达，不崩溃。
+
+### Linux
+
+- [ ] 桌面环境已安装 `secret-tool` 且 D-Bus 会话可用时，设置页显示「已保存 ●●●●（Linux Secret Service）」。
+- [ ] 用 `secret-tool lookup service AIGenCommitMsg account AIGenCommitMsg/DeepSeekToken` 能读到 Token（仅测试机执行，注意不要泄露）。
+- [ ] 无桌面会话 / 无 `secret-tool` 时，插件自动回退「IDE PasswordSafe」，启动与保存均不崩溃、不长时间卡顿。
+- [ ] 在 headless/CI 环境启动 IDE，插件类加载与设置页打开不依赖 D-Bus。
+- [ ] 点击「迁移到系统钥匙串」在没有 Secret Service 时显示「继续使用 IDE PasswordSafe」而不是异常。
 
 ## 已知限制
 
@@ -311,11 +400,18 @@ Token 输入框右侧的「测试连接」按钮：
 - 生成请求超时固定为 60 秒，Token 检测超时为 30 秒，暂未在设置页开放。
 - DeepSeek 请求在后台线程执行，但 HTTP 请求本身不可取消；点击任务进度条的取消只会停止等待。
 - 若生成期间关闭项目或提交对话框，结果可能不会写入输入框。
-- 若 IDE 运行环境无法访问系统钥匙串，PasswordSafe 可能退回内存存储，重启后需重新输入 Token。
+- 系统钥匙串与 PasswordSafe 都按**操作系统用户**隔离，不能防御同一用户下的恶意程序；它们也不是硬件级安全模块。
+- macOS 的 `SecKeychain*` API 自 10.15 起被标记为 deprecated，但当前仍可用；若未来系统移除，需要改用 CoreFoundation 字典 + `SecItem*` API。
+- Linux 依赖 `secret-tool` 与可用的 D-Bus 会话；部分精简发行版默认不安装，插件会回退 PasswordSafe。
+- 非 Windows 平台的 PasswordSafe 使用 IDE 内置 AES 密钥材料；安全强度弱于系统钥匙串。
+- Token 在内存中无法彻底擦除：`char[]` 会清零，但 `String`、HTTP 请求头与 JVM 临时副本不受控制；崩溃转储可能包含 Token。
+- Base URL 仅允许 https（localhost 调试除外）；自定义地址必须勾选确认，且每次请求前都会重新校验。
+- diff 敏感内容扫描是启发式的，只覆盖常见密钥形态，可能漏报或误报；命中时默认打码，不做二次确认。
 - 自定义规则只做**关键词级**的本地模板适配（语言、是否使用 Conventional 前缀、scope、body）；复杂格式要求只在 DeepSeek 路径生效，未配置 Token 时无法完整复刻。
 - 本地模板只为中文、英文准备了固定文案；其他 190+ 种语言在未配置 Token 时使用英文模板，并通过通知明确提示。
 - 阿拉伯语、希伯来语等 RTL 本土名由 Swing 按 Unicode 双向算法直接渲染，不做强制变形；极端字体缺失时可能出现字形替换。
 - 语言列表使用 `Random()` 每次打开设置页重新打乱；不提供手动排序或收藏，定位依赖搜索框。
 - 初始化时迁移只读取旧 `responseLanguage`；若用户从未保存过配置，则默认 `US · English`，不跟随 IDE 界面语言。
 - 「恢复默认规则」只填充输入框，必须点击 Apply 才会保存；关闭设置页前未 Apply 的修改会丢失。
-- UI 交互（按钮填充/禁用状态、下拉搜索）由人工验证，单元测试覆盖的是语言数据、搜索、迁移、提示词拼接与本地回退。
+- UI 交互（按钮填充/禁用状态、下拉搜索、显示/清除/迁移）由人工验证，单元测试覆盖的是语言数据、存储链、迁移、脱敏、URL 策略、敏感扫描与提示词拼接。
+- **未实测项**：Windows 凭据管理器的真实读写（本批仅编译 + 单测 + 设计核对）；macOS 钥匙串与 Linux Secret Service **仅编译通过 + 单测覆盖接口逻辑**，未在真机执行。

@@ -15,7 +15,7 @@ JetBrains Rider 插件：根据 **已暂存改动**（`git diff --cached`）调�
 
 | 项目 | 版本 |
 | --- | --- |
-| 目标 IDE | Rider 2026.2.3.1，build `RD-262.10968.170` |
+| 目标 IDE | Rider 2026.2.4.1，build `RD-262.11879.119`（兼容 build 262+） |
 | IntelliJ Platform | 2026.2（build 262） |
 | 运行时 JDK | Rider 自带 JBR 25.0.4 |
 | 构建 JDK | 使用 Rider 的 JBR 25：`<Rider安装目录>/jbr` |
@@ -23,9 +23,9 @@ JetBrains Rider 插件：根据 **已暂存改动**（`git diff --cached`）调�
 | Kotlin | 2.4.0 |
 | IntelliJ Platform Gradle Plugin | 2.19.0 |
 | 插件兼容范围 | `since-build=262`（按平台建议不设置 `until-build`，向前兼容） |
-| 插件版本 | 0.7.0 |
+| 插件版本 | 0.8.0 |
 
-> 安装目录名可能仍是 `JetBrains Rider 2025.2.3`，但其中的 `product-info.json` 实际报告 `2026.2.3.1`（build 262）。本地平台路径在 [gradle.properties](gradle.properties) 的 `platformLocalPath` 中配置；在其他机器构建时改成对应的 Rider 2026.2 安装目录，或执行：
+> 安装目录名可能仍是 `JetBrains Rider 2025.2.3`，但其中的 `product-info.json` 实际报告 `2026.2.4.1`（build `RD-262.11879.119`）。本地平台路径在 [gradle.properties](gradle.properties) 的 `platformLocalPath` 中配置；在其他机器构建时改成对应的 Rider 2026.2 安装目录，或执行：
 >
 > ```powershell
 > .\gradlew.bat buildPlugin -PplatformLocalPath="D:/path/to/Rider"
@@ -43,7 +43,7 @@ $env:JAVA_HOME = "D:/Procs/IDESS/JetBrains/JetBrains Rider 2025.2.3/jbr"
 产物：
 
 ```
-build/distributions/AIGenCommitMsg-0.7.0.zip
+build/distributions/AIGenCommitMsg-0.8.0.zip
 ```
 
 ### 平台选择（本地 / CI）
@@ -54,20 +54,20 @@ build/distributions/AIGenCommitMsg-0.7.0.zip
 | --- | --- | --- |
 | `auto`（默认） | `.\gradlew.bat buildPlugin` | `platformLocalPath` 指向的目录存在时用本地 IDE，否则下载 IntelliJ IDEA |
 | `local` | `-PplatformMode=local -PplatformLocalPath="D:/path/to/Rider"` | 使用本机安装的 Rider 2026.2 |
-| `download-rider` | `-PplatformMode=download-rider -PplatformVersion=2026.2.3.1` | 从 JetBrains Maven 仓库下载 Rider 平台（约 **4 GB**，适合自托管 runner） |
+| `download-rider` | `-PplatformMode=download-rider -PplatformVersion=2026.2.4.1` | 从 JetBrains Maven 仓库下载 Rider 平台（约 **4 GB**，适合自托管 runner） |
 | `intellij-idea` | `-PplatformMode=intellij-idea -PplatformVersion=2026.2` | 下载 IntelliJ IDEA 2026.2 平台（约 **1.5–1.6 GB**，GitHub 托管 runner 推荐） |
 
 CI 选择 IntelliJ IDEA 的原因：Rider 平台 artifact 在 `intellij-repository` 中约 4 GB，托管 runner 下载 + 解压风险高；本插件只依赖 `com.intellij.modules.platform` 与 VCS API，产物声明 `since-build=262`，与 Rider 2026.2 同属 build 262，运行时兼容。注意 IntelliJ Platform Gradle Plugin 2.x 从 2025.3（253）起不再发布 `ideaIC` 坐标，必须使用统一的 `IntelliJPlatformType.IntellijIdea`（对应 `intellijIdea("2026.2")`），因此本项目不再使用旧的 `IntelliJIdeaCommunity` 类型。若必须用 Rider 平台验证，请用自托管 runner 执行 `download-rider`，或在本机用 `local`。
 
 ## 发布流程
 
-1. 修改 [build.gradle.kts](build.gradle.kts) 中的 `version`（当前 `0.7.0`）；zip 前缀由 [settings.gradle.kts](settings.gradle.kts) 的 `rootProject.name = AIGenCommitMsg` 决定，两者不要改名。
+1. 修改 [build.gradle.kts](build.gradle.kts) 中的 `version`（当前 `0.8.0`）；zip 前缀由 [settings.gradle.kts](settings.gradle.kts) 的 `rootProject.name = AIGenCommitMsg` 决定，两者不要改名。
 2. 提交并推送主分支：`git push origin main`。
 3. 打 tag（必须带 `v` 前缀，数字与 `version` 完全一致）：
 
    ```powershell
-   git tag v0.7.0
-   git push origin v0.7.0
+   git tag v0.8.0
+   git push origin v0.8.0
    ```
 
 4. GitHub Actions 的 `Release` 工作流会被 `push: tags v*` 或 `release: published` 触发（也支持 `workflow_dispatch` 手动补发）：
@@ -91,8 +91,27 @@ CI 与本地只在 IntelliJ Platform SDK 来源上不同（CI 用 `intellij-idea
 
 1. Rider：`Settings > Plugins`。
 2. 齿轮菜单 → `Install Plugin from Disk...`。
-3. 选择 `build/distributions/AIGenCommitMsg-0.7.0.zip`。
+3. 选择 `build/distributions/AIGenCommitMsg-0.8.0.zip`。
 4. 重启 IDE。
+
+### 从旧版 RiderGenGitMsg（0.3.0 及更早）升级
+
+旧版显示名为 `RiderGenGitMsg`、插件 ID 为 `dev.ridergen.gitmsg`；0.4.0 起显示名改为 `AIGenCommitMsg`、插件 ID 改为 `dev.gitmsg.ai.commithelper`。**两者是不同的插件 ID，IDE 不会把新版当作旧版的更新**，因此升级后如果仍看到 `RiderGenGitMsg 0.3.0` 并提示 `Incompatible: requires IDE build 262.* or earlier`，说明旧插件没有被替换，而不是新版有问题（旧版描述符里写了 `until-build="262.*"`，当前 build 262.11879.119 已超出该上限）。
+
+升级步骤：
+
+1. `Settings > Plugins > Installed`，找到 `RiderGenGitMsg`（旧 ID `dev.ridergen.gitmsg`，版本 0.3.0），点齿轮 → `Uninstall`。**不要**勾选删除插件设置（`Delete plugin settings`）——取消勾选可保留配置与凭据引用。
+2. 若旧插件已因不兼容被禁用但仍显示在列表中，同样执行卸载；确认列表里不再有 `RiderGenGitMsg`。
+3. 齿轮菜单 → `Install Plugin from Disk...`，选择 `AIGenCommitMsg-0.8.0.zip`。
+4. 重启 IDE。设置页应显示 `Settings > Tools > AIGenCommitMsg (DeepSeek)`，插件页版本为 `0.8.0`。
+
+配置与 Token 迁移：
+
+- 设置 XML 名（`ridergen-gitmsg.xml`）、状态组件名（`RiderGenGitMsgSettings`）、PasswordSafe 的 service `RiderGenGitMsg` 与 key `DeepSeek API Token` 都被刻意保留，因此旧配置项与旧 Token 仍可被新版读取。
+- 新版首次生成提交信息或打开设置页时，会把 PasswordSafe / 旧 XML 里的明文 Token 迁移到系统钥匙串（顺序：写新 → 回读校验 → 删旧 → 清 XML）；迁移失败会保留旧值并在设置页提示「迁移未完成」，Token 不会丢失。
+- 若在卸载旧插件时勾选了 `Delete plugin settings`，`ridergen-gitmsg.xml` 会被删除，但 PasswordSafe 中的 Token 条目属于 IDE 凭据存储，通常仍会保留；可在新版设置页点「测试连接」确认，若提示未配置则重新粘贴 Token。
+
+若新版仍被判定不兼容，用 `Help > About` 查看 `Build #RD-...`：本插件要求 build **262 及以上**（Rider 2026.2+），且不设置上限；若显示的是 261.x 及更早版本，需要升级 IDE 或改用对应旧版本插件。
 
 ## Marketplace 上传注意事项
 
@@ -415,3 +434,4 @@ Token 输入框下方的「测试连接」按钮：
 - 「恢复默认规则」只填充输入框，必须点击 Apply 才会保存；关闭设置页前未 Apply 的修改会丢失。
 - UI 交互（按钮填充/禁用状态、下拉搜索、显示/清除/迁移）由人工验证，单元测试覆盖的是语言数据、存储链、迁移、脱敏、URL 策略、敏感扫描与提示词拼接。
 - **未实测项**：Windows 凭据管理器的真实读写（本批仅编译 + 单测 + 设计核对）；macOS 钥匙串与 Linux Secret Service **仅编译通过 + 单测覆盖接口逻辑**，未在真机执行。
+- **更高 IDE 分支（263 / 2026.3 及以后）未实测**：0.8.0 在本机 Rider 2026.2.4（build `RD-262.11879.119`）上完成编译、单测与结构校验，且描述符只声明 `since-build=262`、不设上限，因此 IDE 升级后不会被判定不兼容；但由于未在 263+ 上运行，仍存在平台内部 API 变化导致运行期异常的可能。若升级到新分支后按钮消失或报错，请先用 `Help > About` 记录 build 号再反馈。

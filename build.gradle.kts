@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "dev.gitmsg"
-version = "0.7.0"
+version = "0.8.0"
 
 repositories {
     mavenCentral()
@@ -46,7 +46,7 @@ dependencies {
 
             platformMode == "download-rider" -> create(
                 IntelliJPlatformType.Rider,
-                platformVersion ?: "2026.2.3.1"
+                platformVersion ?: "2026.2.4.1"
             )
 
             platformMode == "intellij-idea" -> create(
@@ -107,11 +107,12 @@ intellijPlatform {
             <p><b>Configuration</b></p>
             <p>Open <code>Settings &gt; Tools &gt; AIGenCommitMsg (DeepSeek)</code>, paste a DeepSeek API token, optionally adjust the model or generation rules, and click Apply. The token is never written to project files; it goes to the platform keychain or the IDE PasswordSafe.</p>
             <p><b>Supported IDE</b></p>
-            <p>2026.2 and later (build 262+). Uses the standard VCS APIs and works with any Git repository.</p>
+            <p>2026.2 and later (build 262+), including 2026.2.4 (build 262.11879.119). No upper build bound is declared, so the plugin keeps working after IDE upgrades. Uses the standard VCS APIs and works with any Git repository.</p>
         """.trimIndent()
 
         changeNotes = """
             <ul>
+              <li>0.8.0: rebuilt against Rider 2026.2.4 (build 262.11879.119); the descriptor declares only a minimum build (262) and no upper bound, so IDE upgrades no longer report "requires IDE build 262.* or earlier". Also adds upgrade notes for replacing the old RiderGenGitMsg 0.3.0 plugin, which used a different plugin id and cannot be updated in place.</li>
               <li>0.7.0: token security hardening and three-platform system keychain support (Windows Credential Manager, macOS Keychain, Linux Secret Service) with PasswordSafe fallback; no plaintext refill in settings, masked/clear actions, centralized redaction, https-only base URL policy, automatic legacy plaintext migration and pre-send diff secret masking.</li>
               <li>0.6.0: multilingual commit-message language picker (200+ entries, searchable, random order), language-aware system prompt, legacy zh/en migration and English fallback notice.</li>
               <li>0.5.0: renamed the display name to AIGenCommitMsg to keep it unique on Marketplace.</li>
